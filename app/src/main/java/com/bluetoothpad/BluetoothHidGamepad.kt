@@ -9,6 +9,7 @@ import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
 import android.util.Log
+import android.widget.Toast
 import java.util.concurrent.Executors
 
 class BluetoothHidGamepad(private val context: Context) {
@@ -120,7 +121,8 @@ class BluetoothHidGamepad(private val context: Context) {
 
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var hidDevice: BluetoothHidDevice? = null
-    private var connectedDevice: BluetoothDevice? = null
+    var connectedDevice: BluetoothDevice? = null
+        private set
 
     var isConnected = false
         private set
@@ -143,16 +145,6 @@ class BluetoothHidGamepad(private val context: Context) {
         override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
             isAppRegistered = registered
             Log.d(TAG, "onAppStatusChanged registered=$registered device=${pluggedDevice?.address}")
-            if (registered && pluggedDevice != null) {
-                val hid = hidDevice ?: return
-                try {
-                    if (hid.getConnectionState(pluggedDevice) != BluetoothProfile.STATE_CONNECTED) {
-                        hid.connect(pluggedDevice)
-                    }
-                } catch (e: SecurityException) {
-                    Log.e(TAG, "SecurityException on connect", e)
-                }
-            }
             onStatusChanged?.invoke()
         }
 
@@ -241,12 +233,27 @@ class BluetoothHidGamepad(private val context: Context) {
     }
 
     fun connectDevice(device: BluetoothDevice) {
-        val hid = hidDevice ?: return
-        if (!isAppRegistered) return
+        val hid = hidDevice ?: run {
+            Toast.makeText(context, "HID profile not ready, tap Start / Reconnect", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!isAppRegistered) {
+            Toast.makeText(context, "App not registered yet, please wait", Toast.LENGTH_SHORT).show()
+            return
+        }
         try {
             hid.connect(device)
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException connect", e)
+        }
+    }
+
+    fun cancelConnect(device: BluetoothDevice) {
+        val hid = hidDevice ?: return
+        try {
+            hid.disconnect(device)
+        } catch (e: SecurityException) {
+            Log.e(TAG, "SecurityException disconnect", e)
         }
     }
 

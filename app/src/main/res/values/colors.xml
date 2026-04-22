@@ -1,10 +1,44 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
+    <!-- Brand / primary palette -->
+    <color name="primary">#FF0061A4</color>
+    <color name="on_primary">#FFFFFFFF</color>
+    <color name="secondary">#FF4858AB</color>
+    <color name="on_secondary">#FFFFFFFF</color>
+    <color name="error">#FFBA1A1A</color>
+    <color name="on_error">#FFFFFFFF</color>
+
+    <color name="top_bar_bg">#FF0061A4</color>
+
+    <!-- Surface / background (connection screen) -->
+    <color name="background">#FFF8F9FA</color>
+    <color name="surface">#FFFFFFFF</color>
+    <color name="on_surface">#FF191C1D</color>
+    <color name="on_surface_variant">#FF404752</color>
+    <color name="outline_variant">#FFBFC7D4</color>
+    <color name="card_bg_dinput">#FFEAF2FF</color>
+
+
+    <!-- Status colors -->
+    <color name="status_connected">#FF4CAF50</color>
+    <color name="status_connecting">#FFFFC107</color>
+    <color name="status_error">#FFCF6679</color>
+
+    <!-- Controller screen dark background -->
+    <color name="controller_bg">#FF1A1A2E</color>
+
+    <!-- Controller buttons -->
+    <color name="btn_primary">#FF333355</color>
+    <color name="btn_secondary">#FF2A2A4A</color>
+    <color name="btn_disconnect">#FF880000</color>
+    <color name="stick_base">#FF222244</color>
+    <color name="stick_knob">#FF555588</color>
+    <color name="dpad_arrow_normal">#FF555577</color>
+    <color name="dpad_arrow_pressed">#FF8888CC</color>
+
+    <!-- ABXY face buttons -->
+    <color name="btn_a">#FF00AA00</color>
+    <color name="btn_b">#FFCC0000</color>
+    <color name="btn_x">#FF0060CC</color>
+    <color name="btn_y">#FFCCA000</color>
 </resources>

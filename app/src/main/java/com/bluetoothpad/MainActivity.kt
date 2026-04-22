@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.widget.Toast
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -41,6 +42,7 @@ class MainActivity : ComponentActivity() {
     private val isWindowsMode = mutableStateOf(false)
 
     private var gamepad: BluetoothHidGamepad? = null
+    private var userCancelledConnect = false
     lateinit var prefs: SharedPreferences
 
     private val permissionLauncher = registerForActivityResult(
@@ -101,14 +103,18 @@ class MainActivity : ComponentActivity() {
                         connectedDeviceName = connectedDeviceName.value,
                         ownDeviceName = ownDeviceName.value,
                         isWindowsMode = isWindowsMode.value,
-                        onStartClick = { requestPermissionsAndInit() },
+                        onStartClick = { requestPermissionsAndInit(); reconnectLastDevice() },
                         onWindowsModeToggle = { value ->
                             isWindowsMode.value = value
                             prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
                         },
                         onPairDevice = { device -> pairDevice(device) },
                         onUnpairDevice = { device -> unpairDevice(device) },
-                        onConnectDevice = { device -> gamepad?.connectDevice(device) }
+                        onConnectDevice = { device -> gamepad?.connectDevice(device) },
+                        onCancelConnect = { device ->
+                            userCancelledConnect = true
+                            gamepad?.cancelConnect(device)
+                        }
                     )
                 }
             }
@@ -169,12 +175,31 @@ class MainActivity : ComponentActivity() {
                 gp.isWindowsDInputMode = isWindowsMode.value
                 gp.onStatusChanged = {
                     runOnUiThread {
+                        val prevState = hidConnectionState.value
                         hidProfileConnected.value = gp.isAppRegistered || gp.connectionState != BluetoothProfile.STATE_DISCONNECTED
                         hidAppRegistered.value = gp.isAppRegistered
                         hidConnectionState.value = gp.connectionState
                         connected.value = gp.isConnected
                         connectedDeviceName.value = gp.connectedDeviceName
                         ownDeviceName.value = gp.ownDeviceName
+
+                        when (gp.connectionState) {
+                            BluetoothProfile.STATE_CONNECTED -> {
+                                prefs.edit().putString("lastDeviceAddress", gp.connectedDevice?.address).apply()
+                                Toast.makeText(this, "Connected to ${gp.connectedDeviceName}", Toast.LENGTH_SHORT).show()
+                            }
+                            BluetoothProfile.STATE_DISCONNECTED -> {
+                                if (!userCancelledConnect) {
+                                    when (prevState) {
+                                        BluetoothProfile.STATE_CONNECTING ->
+                                            Toast.makeText(this, "Connecting device failed", Toast.LENGTH_SHORT).show()
+                                        BluetoothProfile.STATE_CONNECTED ->
+                                            Toast.makeText(this, "Disconnected", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                                userCancelledConnect = false
+                            }
+                        }
                     }
                 }
                 gp.start()
@@ -191,6 +216,16 @@ class MainActivity : ComponentActivity() {
         hidAppRegistered.value = false
         hidConnectionState.value = BluetoothProfile.STATE_DISCONNECTED
         connectedDeviceName.value = ""
+    }
+
+    private fun reconnectLastDevice() {
+        val address = prefs.getString("lastDeviceAddress", null) ?: return
+        val gp = gamepad ?: return
+        try {
+            val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+            val device = manager?.adapter?.bondedDevices?.find { it.address == address }
+            if (device != null) gp.connectDevice(device)
+        } catch (_: SecurityException) { }
     }
 
     fun getBondedDevices(): List<BluetoothDevice> {

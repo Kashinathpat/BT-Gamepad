@@ -1,5 +1,6 @@
 package com.bluetoothpad
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -9,7 +10,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -26,7 +26,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -37,6 +36,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bluetoothpad.ui.theme.BtnA
+import com.bluetoothpad.ui.theme.BtnB
+import com.bluetoothpad.ui.theme.BtnDisconnect
+import com.bluetoothpad.ui.theme.BtnPrimary
+import com.bluetoothpad.ui.theme.BtnSecondary
+import com.bluetoothpad.ui.theme.BtnX
+import com.bluetoothpad.ui.theme.BtnY
+import com.bluetoothpad.ui.theme.ControllerBg
+import com.bluetoothpad.ui.theme.DpadNormal
+import com.bluetoothpad.ui.theme.DpadPressed
+import com.bluetoothpad.ui.theme.StatusConnected
+import com.bluetoothpad.ui.theme.StickBase
+import com.bluetoothpad.ui.theme.StickKnob
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -51,7 +63,7 @@ fun ControllerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF1A1A2E))
+            .background(ControllerBg)
     ) {
         // Device name + disconnect centered at top
         Row(
@@ -64,11 +76,11 @@ fun ControllerScreen(
             Text(
                 text = if (connectedDeviceName.isNotEmpty()) connectedDeviceName else "Not connected",
                 fontSize = 11.sp,
-                color = if (connectedDeviceName.isNotEmpty()) Color(0xFF4CAF50) else Color.Gray
+                color = if (connectedDeviceName.isNotEmpty()) StatusConnected else Color.Gray
             )
             Button(
                 onClick = onStopClick,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF880000)),
+                colors = ButtonDefaults.buttonColors(containerColor = BtnDisconnect),
                 modifier = Modifier.height(26.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
             ) {
@@ -92,7 +104,7 @@ fun ControllerScreen(
             GamepadBtn(
                 label = "LT",
                 modifier = Modifier.width(80.dp).height(36.dp),
-                color = Color(0xFF2A2A4A),
+                color = BtnSecondary,
                 onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LT, true) },
                 onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LT, false) }
             )
@@ -114,7 +126,7 @@ fun ControllerScreen(
             GamepadBtn(
                 label = "RT",
                 modifier = Modifier.width(80.dp).height(36.dp),
-                color = Color(0xFF2A2A4A),
+                color = BtnSecondary,
                 onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RT, true) },
                 onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RT, false) }
             )
@@ -129,7 +141,7 @@ fun ControllerScreen(
                 .size(44.dp),
             shape = CircleShape,
             fontSize = 10,
-            color = Color(0xFF2A2A4A),
+            color = BtnSecondary,
             onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_L3, true) },
             onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_L3, false) }
         )
@@ -143,7 +155,7 @@ fun ControllerScreen(
                 .size(44.dp),
             shape = CircleShape,
             fontSize = 10,
-            color = Color(0xFF2A2A4A),
+            color = BtnSecondary,
             onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_R3, true) },
             onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_R3, false) }
         )
@@ -195,7 +207,7 @@ fun ControllerScreen(
                 modifier = Modifier.width(64.dp).height(30.dp),
                 fontSize = 9,
                 shape = RoundedCornerShape(15.dp),
-                color = Color(0xFF2A2A4A),
+                color = BtnSecondary,
                 onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_SELECT, true) },
                 onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_SELECT, false) }
             )
@@ -204,7 +216,7 @@ fun ControllerScreen(
                 modifier = Modifier.width(64.dp).height(30.dp),
                 fontSize = 9,
                 shape = RoundedCornerShape(15.dp),
-                color = Color(0xFF2A2A4A),
+                color = BtnSecondary,
                 onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_START, true) },
                 onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_START, false) }
             )
@@ -217,7 +229,7 @@ fun GamepadBtn(
     label: String? = null,
     modifier: Modifier = Modifier,
     shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(8.dp),
-    color: Color = Color(0xFF333355),
+    color: Color = BtnPrimary,
     fontSize: Int = 14,
     fontWeight: FontWeight = FontWeight.Bold,
     onDown: () -> Unit,
@@ -273,7 +285,7 @@ fun AnalogStick(
     Box(
         modifier = Modifier
             .size(size.dp)
-            .background(Color(0xFF222244), CircleShape),
+            .background(StickBase, CircleShape),
         contentAlignment = Alignment.Center
     ) {
         Box(
@@ -282,7 +294,7 @@ fun AnalogStick(
                 .offset {
                     IntOffset(offsetX.floatValue.roundToInt(), offsetY.floatValue.roundToInt())
                 }
-                .background(Color(0xFF555588), CircleShape)
+                .background(StickKnob, CircleShape)
                 .pointerInput(Unit) {
                     detectDragGestures(
                         onDragEnd = {
@@ -313,16 +325,12 @@ fun AnalogStick(
     }
 }
 
-// Single canvas D-pad: 4 arrow arms meeting at center, no middle square.
-// Touch direction is determined by which arm the finger lands on.
 @Composable
 fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?) {
-    // Which direction is currently pressed (null = none)
     val activeDir = remember { mutableStateOf<DpadDir?>(null) }
 
     fun press(dir: DpadDir) {
         if (activeDir.value == dir) return
-        // release previous
         activeDir.value?.let { prev ->
             if (isWindowsMode) when (prev) {
                 DpadDir.UP -> gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_UP, false)
@@ -360,7 +368,6 @@ fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?) {
     fun dirFromOffset(x: Float, y: Float, cx: Float, cy: Float): DpadDir? {
         val dx = x - cx
         val dy = y - cy
-        // ignore center dead zone (inner 20% of radius)
         val totalSize = cx * 2
         val dead = totalSize * 0.15f
         if (abs(dx) < dead && abs(dy) < dead) return null
@@ -371,18 +378,14 @@ fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?) {
         }
     }
 
-    // Map each direction to the alignment anchor where its image should sit
     val arms = listOf(
         DpadDir.UP    to Alignment.TopCenter,
         DpadDir.DOWN  to Alignment.BottomCenter,
         DpadDir.LEFT  to Alignment.CenterStart,
         DpadDir.RIGHT to Alignment.CenterEnd
     )
-    // Drawable tip points UP. Rotate so tip points inward for each direction:
-    // UP arm sits at top   → tip must point down (180°)
-    // DOWN arm sits at bot → tip must point up   (0°)
-    // LEFT arm sits left   → tip must point right (90°)
-    // RIGHT arm sits right → tip must point left  (270°)
+    // Drawable tip points UP. Rotate so tip points inward:
+    // UP@top → 180°, DOWN@bottom → 0°, LEFT@left → 90°, RIGHT@right → 270°
     val rotations = mapOf(
         DpadDir.UP    to 180f,
         DpadDir.DOWN  to 0f,
@@ -411,11 +414,10 @@ fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?) {
         contentAlignment = Alignment.Center
     ) {
         val active = activeDir.value
-        // inset pulls arrows toward center; drawable has ~15% padding at base so bump inward
         val arrowSize = 56.dp
         val inset = 8.dp
         arms.forEach { (dir, anchor) ->
-            val tint = if (active == dir) Color(0xFF8888CC) else Color(0xFF555577)
+            val tint = if (active == dir) DpadPressed else DpadNormal
             val offsetMod = when (dir) {
                 DpadDir.UP    -> Modifier.offset(y = inset)
                 DpadDir.DOWN  -> Modifier.offset(y = -inset)
@@ -448,7 +450,7 @@ fun AbxyButtons(onButton: (Int, Boolean) -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         GamepadBtn(
             label = "Y", modifier = Modifier.size(btnSize), shape = CircleShape,
-            color = Color(0xFFCCA000), fontSize = 17,
+            color = BtnY, fontSize = 17,
             onDown = { onButton(BluetoothHidGamepad.BUTTON_Y, true) },
             onUp = { onButton(BluetoothHidGamepad.BUTTON_Y, false) }
         )
@@ -456,14 +458,14 @@ fun AbxyButtons(onButton: (Int, Boolean) -> Unit) {
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             GamepadBtn(
                 label = "X", modifier = Modifier.size(btnSize), shape = CircleShape,
-                color = Color(0xFF0060CC), fontSize = 17,
+                color = BtnX, fontSize = 17,
                 onDown = { onButton(BluetoothHidGamepad.BUTTON_X, true) },
                 onUp = { onButton(BluetoothHidGamepad.BUTTON_X, false) }
             )
             Spacer(modifier = Modifier.size(btnSize - 10.dp))
             GamepadBtn(
                 label = "B", modifier = Modifier.size(btnSize), shape = CircleShape,
-                color = Color(0xFFCC0000), fontSize = 17,
+                color = BtnB, fontSize = 17,
                 onDown = { onButton(BluetoothHidGamepad.BUTTON_B, true) },
                 onUp = { onButton(BluetoothHidGamepad.BUTTON_B, false) }
             )
@@ -471,7 +473,7 @@ fun AbxyButtons(onButton: (Int, Boolean) -> Unit) {
         Spacer(modifier = Modifier.height(2.dp))
         GamepadBtn(
             label = "A", modifier = Modifier.size(btnSize), shape = CircleShape,
-            color = Color(0xFF00AA00), fontSize = 17,
+            color = BtnA, fontSize = 17,
             onDown = { onButton(BluetoothHidGamepad.BUTTON_A, true) },
             onUp = { onButton(BluetoothHidGamepad.BUTTON_A, false) }
         )
