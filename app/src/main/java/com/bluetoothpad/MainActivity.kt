@@ -2,198 +2,237 @@ package com.bluetoothpad
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.content.SharedPreferences
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.bluetoothpad.ui.theme.BluetoothPadTheme
+import java.lang.reflect.Method
 
 class MainActivity : ComponentActivity() {
 
-    private val statusText = mutableStateOf("Tap 'Start Gamepad' to begin")
     private val connected = mutableStateOf(false)
-    private val ownName = mutableStateOf("")
-    private val connectedName = mutableStateOf("")
-    private var gamepad: BluetoothHidGamepad? = null
+    private val hidProfileConnected = mutableStateOf(false)
+    private val hidAppRegistered = mutableStateOf(false)
+    private val hidConnectionState = mutableStateOf(BluetoothProfile.STATE_DISCONNECTED)
+    private val connectedDeviceName = mutableStateOf("")
+    private val ownDeviceName = mutableStateOf("")
+    private val isWindowsMode = mutableStateOf(false)
 
-    private val discoverableLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode > 0) {
-            statusText.value = "Discoverable for ${result.resultCode}s. Waiting for connection..."
-        } else {
-            statusText.value = "Discoverability denied. Other devices won't find you."
-        }
-    }
+    private var gamepad: BluetoothHidGamepad? = null
+    lateinit var prefs: SharedPreferences
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        val allGranted = results.values.all { it }
-        if (allGranted) {
-            startGamepad()
-        } else {
-            statusText.value = "Bluetooth permissions denied"
+        if (results.values.all { it }) {
+            initGamepad()
+        }
+    }
+
+    private val bondReceiver = object : BroadcastReceiver() {
+        override fun onReceive(_context: Context, intent: Intent) {
+            if (intent.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
+            val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+            val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
+            if (state == BluetoothDevice.BOND_BONDED) {
+                gamepad?.connectDevice(device)
+            }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        prefs = getSharedPreferences("data", MODE_PRIVATE)
+        isWindowsMode.value = prefs.getBoolean("isWindowsDInputMode", false)
+
+        registerReceiver(bondReceiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED), RECEIVER_EXPORTED)
+
         enableEdgeToEdge()
         setContent {
             BluetoothPadTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    GamepadScreen(
-                        status = statusText.value,
-                        isConnected = connected.value,
-                        ownDeviceName = ownName.value,
-                        connectedDeviceName = connectedName.value,
-                        onStartClick = { requestPermissionsAndStart() },
-                        onStopClick = { stopGamepad() },
-                        onButtonAClick = { gamepad?.pressAndReleaseButton(0x01) },
-                        modifier = Modifier.padding(innerPadding)
+                requestedOrientation = if (connected.value) {
+                    ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                } else {
+                    ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                }
+
+                if (connected.value) {
+                    val controller = WindowCompat.getInsetsController(window, window.decorView)
+                    controller.hide(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+                    controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    ControllerScreen(
+                        gamepad = gamepad,
+                        isWindowsMode = isWindowsMode.value,
+                        connectedDeviceName = connectedDeviceName.value,
+                        onStopClick = { stopGamepad() }
+                    )
+                } else {
+                    val controller = WindowCompat.getInsetsController(window, window.decorView)
+                    controller.show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    ConnectionScreen(
+                        activity = this,
+                        hidProfileConnected = hidProfileConnected.value,
+                        hidAppRegistered = hidAppRegistered.value,
+                        hidConnectionState = hidConnectionState.value,
+                        connectedDeviceName = connectedDeviceName.value,
+                        ownDeviceName = ownDeviceName.value,
+                        isWindowsMode = isWindowsMode.value,
+                        onStartClick = { requestPermissionsAndInit() },
+                        onWindowsModeToggle = { value ->
+                            isWindowsMode.value = value
+                            prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
+                        },
+                        onPairDevice = { device -> pairDevice(device) },
+                        onUnpairDevice = { device -> unpairDevice(device) },
+                        onConnectDevice = { device -> gamepad?.connectDevice(device) }
                     )
                 }
             }
         }
-    }
 
-    private fun requestPermissionsAndStart() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val needed = mutableListOf<String>()
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                needed.add(Manifest.permission.BLUETOOTH_CONNECT)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                needed.add(Manifest.permission.BLUETOOTH_ADVERTISE)
-            }
-            if (needed.isNotEmpty()) {
-                permissionLauncher.launch(needed.toTypedArray())
-                return
-            }
+        if (hasRequiredPermissions()) {
+            initGamepad()
         }
-        startGamepad()
     }
 
-    private fun startGamepad() {
-        if (gamepad != null) {
-            statusText.value = "Already running"
+    private fun hasRequiredPermissions(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun requestPermissionsAndInit() {
+        if (hasRequiredPermissions()) {
+            initGamepad()
             return
         }
-        gamepad = BluetoothHidGamepad(this).apply {
-            onStatusChanged = { status ->
-                runOnUiThread {
-                    statusText.value = status
-                    connected.value = isConnected
-                    ownName.value = ownDeviceName
-                    connectedName.value = connectedDeviceName
-                }
-            }
+        val needed = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)
+                needed.add(Manifest.permission.BLUETOOTH_CONNECT)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED)
+                needed.add(Manifest.permission.BLUETOOTH_SCAN)
+        } else {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
+                needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
         }
-        val result = gamepad!!.start()
-        statusText.value = result
-        ownName.value = gamepad!!.ownDeviceName
-        makeDiscoverable()
+        if (needed.isNotEmpty()) {
+            permissionLauncher.launch(needed.toTypedArray())
+        }
     }
 
-    private fun makeDiscoverable() {
-        val intent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
-            putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
+    fun initGamepad() {
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
         }
-        discoverableLauncher.launch(intent)
+
+        val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+        val adapter = manager?.adapter
+        if (adapter != null && !adapter.isEnabled) {
+            try {
+                startActivity(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+            } catch (_: Exception) {
+                startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+            }
+        }
+
+        if (gamepad == null) {
+            gamepad = BluetoothHidGamepad(this).also { gp ->
+                gp.isWindowsDInputMode = isWindowsMode.value
+                gp.onStatusChanged = {
+                    runOnUiThread {
+                        hidProfileConnected.value = gp.isAppRegistered || gp.connectionState != BluetoothProfile.STATE_DISCONNECTED
+                        hidAppRegistered.value = gp.isAppRegistered
+                        hidConnectionState.value = gp.connectionState
+                        connected.value = gp.isConnected
+                        connectedDeviceName.value = gp.connectedDeviceName
+                        ownDeviceName.value = gp.ownDeviceName
+                    }
+                }
+                gp.start()
+            }
+        }
+        ownDeviceName.value = gamepad?.ownDeviceName ?: ""
     }
 
     private fun stopGamepad() {
         gamepad?.stop()
         gamepad = null
         connected.value = false
-        statusText.value = "Stopped"
+        hidProfileConnected.value = false
+        hidAppRegistered.value = false
+        hidConnectionState.value = BluetoothProfile.STATE_DISCONNECTED
+        connectedDeviceName.value = ""
+    }
+
+    fun getBondedDevices(): List<BluetoothDevice> {
+        return try {
+            val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+            manager?.adapter?.bondedDevices?.toList() ?: emptyList()
+        } catch (_: SecurityException) {
+            emptyList()
+        }
+    }
+
+    fun startDiscovery() {
+        try {
+            val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+            manager?.adapter?.startDiscovery()
+        } catch (_: SecurityException) { }
+    }
+
+    fun cancelDiscovery() {
+        try {
+            val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+            manager?.adapter?.cancelDiscovery()
+        } catch (_: SecurityException) { }
+    }
+
+    private fun pairDevice(device: BluetoothDevice) {
+        try {
+            device.createBond()
+        } catch (_: SecurityException) { }
+    }
+
+    fun unpairDevice(device: BluetoothDevice) {
+        try {
+            val method: Method = device.javaClass.getMethod("removeBond")
+            method.isAccessible = true
+            method.invoke(device)
+        } catch (_: Exception) { }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         gamepad?.stop()
-    }
-}
-
-@Composable
-fun GamepadScreen(
-    status: String,
-    isConnected: Boolean,
-    ownDeviceName: String,
-    connectedDeviceName: String,
-    onStartClick: () -> Unit,
-    onStopClick: () -> Unit,
-    onButtonAClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(text = "BluetoothPad", fontSize = 24.sp)
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        if (ownDeviceName.isNotEmpty()) {
-            Text(text = "This device: $ownDeviceName", fontSize = 13.sp)
-        }
-        if (connectedDeviceName.isNotEmpty()) {
-            Text(text = "Connected to: $connectedDeviceName", fontSize = 13.sp)
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(text = status, fontSize = 14.sp)
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Button(onClick = onStartClick) {
-            Text("Start Gamepad")
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Button(onClick = onStopClick) {
-            Text("Stop")
-        }
-
-        if (isConnected) {
-            Spacer(modifier = Modifier.height(32.dp))
-
-            Button(
-                onClick = onButtonAClick,
-                modifier = Modifier
-                    .height(80.dp)
-                    .padding(8.dp)
-            ) {
-                Text("A", fontSize = 24.sp)
-            }
-        }
+        unregisterReceiver(bondReceiver)
     }
 }
