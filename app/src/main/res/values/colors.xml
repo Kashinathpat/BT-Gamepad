@@ -1,44 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Brand / primary palette -->
-    <color name="primary">#FF0061A4</color>
-    <color name="on_primary">#FFFFFFFF</color>
-    <color name="secondary">#FF4858AB</color>
-    <color name="on_secondary">#FFFFFFFF</color>
-    <color name="error">#FFBA1A1A</color>
-    <color name="on_error">#FFFFFFFF</color>
+    <!-- Light scheme (seed #0061A4) -->
+    <color name="md_light_primary">#FF0061A4</color>
+    <color name="md_light_on_primary">#FFFFFFFF</color>
+    <color name="md_light_primary_container">#FFD1E4FF</color>
+    <color name="md_light_on_primary_container">#FF001D36</color>
+    <color name="md_light_secondary">#FF535F70</color>
+    <color name="md_light_on_secondary">#FFFFFFFF</color>
+    <color name="md_light_secondary_container">#FFD7E3F7</color>
+    <color name="md_light_on_secondary_container">#FF101C2B</color>
+    <color name="md_light_error">#FFBA1A1A</color>
+    <color name="md_light_on_error">#FFFFFFFF</color>
+    <color name="md_light_background">#FFFAFCFF</color>
+    <color name="md_light_surface">#FFFAFCFF</color>
+    <color name="md_light_on_surface">#FF1A1C1E</color>
+    <color name="md_light_on_surface_variant">#FF43474E</color>
+    <color name="md_light_outline">#FF73777F</color>
+    <color name="md_light_outline_variant">#FFC3C7CF</color>
 
+    <!-- Dark scheme (seed #0061A4) -->
+    <color name="md_dark_primary">#FF9ECAFF</color>
+    <color name="md_dark_on_primary">#FF003258</color>
+    <color name="md_dark_primary_container">#FF00497D</color>
+    <color name="md_dark_on_primary_container">#FFD1E4FF</color>
+    <color name="md_dark_secondary">#FFBBC7DB</color>
+    <color name="md_dark_on_secondary">#FF253140</color>
+    <color name="md_dark_error">#FFFFB4AB</color>
+    <color name="md_dark_on_error">#FF690005</color>
+    <color name="md_dark_background">#FF111418</color>
+    <color name="md_dark_surface">#FF111418</color>
+    <color name="md_dark_on_surface">#FFE2E2E6</color>
+    <color name="md_dark_on_surface_variant">#FFC3C7CF</color>
+    <color name="md_dark_outline">#FF8D9199</color>
+    <color name="md_dark_outline_variant">#FF43474E</color>
+
+    <!-- App-specific -->
     <color name="top_bar_bg">#FF0061A4</color>
-
-    <!-- Surface / background (connection screen) -->
-    <color name="background">#FFF8F9FA</color>
-    <color name="surface">#FFFFFFFF</color>
-    <color name="on_surface">#FF191C1D</color>
-    <color name="on_surface_variant">#FF404752</color>
-    <color name="outline_variant">#FFBFC7D4</color>
-    <color name="card_bg_dinput">#FFEAF2FF</color>
-
-
-    <!-- Status colors -->
-    <color name="status_connected">#FF4CAF50</color>
-    <color name="status_connecting">#FFFFC107</color>
-    <color name="status_error">#FFCF6679</color>
-
-    <!-- Controller screen dark background -->
-    <color name="controller_bg">#FF1A1A2E</color>
-
-    <!-- Controller buttons -->
-    <color name="btn_primary">#FF333355</color>
-    <color name="btn_secondary">#FF2A2A4A</color>
-    <color name="btn_disconnect">#FF880000</color>
-    <color name="stick_base">#FF222244</color>
-    <color name="stick_knob">#FF555588</color>
-    <color name="dpad_arrow_normal">#FF555577</color>
-    <color name="dpad_arrow_pressed">#FF8888CC</color>
-
-    <!-- ABXY face buttons -->
-    <color name="btn_a">#FF00AA00</color>
-    <color name="btn_b">#FFCC0000</color>
-    <color name="btn_x">#FF0060CC</color>
-    <color name="btn_y">#FFCCA000</color>
+    <color name="top_bar_bg_dark">#FF00497D</color>
+    <color name="on_primary">#FFFFFFFF</color>
+    <color name="status_connected">#FF2E7D32</color>
+    <color name="status_connecting">#FFF57F17</color>
+    <color name="status_error">#FFB71C1C</color>
+    <color name="controller_bg">#FF111318</color>
+    <color name="btn_disconnect">#FF8B0000</color>
 </resources>

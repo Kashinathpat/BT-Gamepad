@@ -28,6 +28,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.bluetoothpad.ui.theme.AppTheme
 import com.bluetoothpad.ui.theme.BluetoothPadTheme
 import java.lang.reflect.Method
 
@@ -40,6 +41,8 @@ class MainActivity : ComponentActivity() {
     private val connectedDeviceName = mutableStateOf("")
     private val ownDeviceName = mutableStateOf("")
     private val isWindowsMode = mutableStateOf(false)
+    private val appTheme = mutableStateOf(AppTheme.SYSTEM)
+    private val showSettings = mutableStateOf(false)
 
     private var gamepad: BluetoothHidGamepad? = null
     private var userCancelledConnect = false
@@ -68,12 +71,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("data", MODE_PRIVATE)
         isWindowsMode.value = prefs.getBoolean("isWindowsDInputMode", false)
+        appTheme.value = when (prefs.getString("appTheme", "SYSTEM")) {
+            "LIGHT"  -> AppTheme.LIGHT
+            "DARK"   -> AppTheme.DARK
+            else     -> AppTheme.SYSTEM
+        }
 
         registerReceiver(bondReceiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED), RECEIVER_EXPORTED)
 
         enableEdgeToEdge()
         setContent {
-            BluetoothPadTheme {
+            BluetoothPadTheme(appTheme = appTheme.value) {
                 requestedOrientation = if (connected.value) {
                     ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                 } else {
@@ -95,27 +103,40 @@ class MainActivity : ComponentActivity() {
                     val controller = WindowCompat.getInsetsController(window, window.decorView)
                     controller.show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
                     window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    ConnectionScreen(
-                        activity = this,
-                        hidProfileConnected = hidProfileConnected.value,
-                        hidAppRegistered = hidAppRegistered.value,
-                        hidConnectionState = hidConnectionState.value,
-                        connectedDeviceName = connectedDeviceName.value,
-                        ownDeviceName = ownDeviceName.value,
-                        isWindowsMode = isWindowsMode.value,
-                        onStartClick = { requestPermissionsAndInit(); reconnectLastDevice() },
-                        onWindowsModeToggle = { value ->
-                            isWindowsMode.value = value
-                            prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
-                        },
-                        onPairDevice = { device -> pairDevice(device) },
-                        onUnpairDevice = { device -> unpairDevice(device) },
-                        onConnectDevice = { device -> gamepad?.connectDevice(device) },
-                        onCancelConnect = { device ->
-                            userCancelledConnect = true
-                            gamepad?.cancelConnect(device)
-                        }
-                    )
+                    if (showSettings.value) {
+                        SettingsScreen(
+                            appTheme = appTheme.value,
+                            appVersion = "1.0",
+                            onThemeChange = { theme ->
+                                appTheme.value = theme
+                                prefs.edit().putString("appTheme", theme.name).apply()
+                            },
+                            onBack = { showSettings.value = false }
+                        )
+                    } else {
+                        ConnectionScreen(
+                            activity = this,
+                            hidProfileConnected = hidProfileConnected.value,
+                            hidAppRegistered = hidAppRegistered.value,
+                            hidConnectionState = hidConnectionState.value,
+                            connectedDeviceName = connectedDeviceName.value,
+                            ownDeviceName = ownDeviceName.value,
+                            isWindowsMode = isWindowsMode.value,
+                            onStartClick = { requestPermissionsAndInit(); reconnectLastDevice() },
+                            onWindowsModeToggle = { value ->
+                                isWindowsMode.value = value
+                                prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
+                            },
+                            onPairDevice = { device -> pairDevice(device) },
+                            onUnpairDevice = { device -> unpairDevice(device) },
+                            onConnectDevice = { device -> gamepad?.connectDevice(device) },
+                            onCancelConnect = { device ->
+                                userCancelledConnect = true
+                                gamepad?.cancelConnect(device)
+                            },
+                            onSettingsClick = { showSettings.value = true }
+                        )
+                    }
                 }
             }
         }

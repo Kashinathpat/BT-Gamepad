@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.BluetoothPad" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:colorPrimary">@color/primary</item>
-        <item name="android:colorAccent">@color/secondary</item>
-        <item name="android:windowBackground">@color/background</item>
-        <item name="android:colorBackground">@color/background</item>
-        <item name="android:textColorPrimary">@color/on_surface</item>
-        <item name="android:textColorSecondary">@color/on_surface_variant</item>
+        <item name="android:colorPrimary">@color/md_light_primary</item>
+        <item name="android:colorAccent">@color/md_light_secondary</item>
+        <item name="android:windowBackground">@color/md_light_background</item>
+        <item name="android:colorBackground">@color/md_light_background</item>
+        <item name="android:textColorPrimary">@color/md_light_on_surface</item>
+        <item name="android:textColorSecondary">@color/md_light_on_surface_variant</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
