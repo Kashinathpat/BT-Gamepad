@@ -17,7 +17,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.SnackbarHost
@@ -51,7 +50,6 @@ import com.bluetoothpad.ui.theme.BtnY
 import com.bluetoothpad.ui.theme.ControllerBg
 import com.bluetoothpad.ui.theme.ControllerOnBtn
 import com.bluetoothpad.ui.theme.DpadNormal
-import com.bluetoothpad.ui.theme.EditorDelete
 import com.bluetoothpad.ui.theme.EditorSave
 import com.bluetoothpad.ui.theme.EditorSelected
 import com.bluetoothpad.ui.theme.OverlayPill
@@ -79,6 +77,16 @@ fun LayoutEditorScreen(
             .fillMaxSize()
             .background(ControllerBg)
             .onSizeChanged { canvasSize.value = it }
+            .pointerInput(selectedId.value) {
+                detectTransformGestures(panZoomLock = false) { _, _, zoom, _ ->
+                    if (zoom == 1f) return@detectTransformGestures
+                    val id = selectedId.value ?: return@detectTransformGestures
+                    val i = buttons.indexOfFirst { it.id == id }
+                    if (i < 0) return@detectTransformGestures
+                    val cur = buttons[i]
+                    buttons[i] = cur.copy(sizeFrac = (cur.sizeFrac * zoom).coerceIn(0.04f, 0.35f))
+                }
+            }
     ) {
         val w = canvasSize.value.width.toFloat()
         val h = canvasSize.value.height.toFloat()
@@ -103,15 +111,14 @@ fun LayoutEditorScreen(
                             else Modifier
                         )
                         .pointerInput(btn.id) {
-                            detectTransformGestures(panZoomLock = false) { _, pan, zoom, _ ->
+                            detectTransformGestures(panZoomLock = false) { _, pan, _, _ ->
                                 val i = buttons.indexOfFirst { it.id == btn.id }
                                 if (i < 0) return@detectTransformGestures
                                 selectedId.value = btn.id
                                 val cur = buttons[i]
                                 val newX = (cur.xFrac + pan.x / w).coerceIn(0.02f, 0.98f)
                                 val newY = (cur.yFrac + pan.y / h).coerceIn(0.02f, 0.98f)
-                                val newSize = (cur.sizeFrac * zoom).coerceIn(0.04f, 0.35f)
-                                buttons[i] = cur.copy(xFrac = newX, yFrac = newY, sizeFrac = newSize)
+                                buttons[i] = cur.copy(xFrac = newX, yFrac = newY)
                             }
                         },
                     contentAlignment = Alignment.Center
@@ -150,16 +157,6 @@ fun LayoutEditorScreen(
                     fontSize = 11.sp,
                     color = EditorSelected
                 )
-                Spacer(Modifier.width(4.dp))
-                IconButton(
-                    onClick = {
-                        buttons.removeAll { it.id == sel.id }
-                        selectedId.value = null
-                    },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = EditorDelete, modifier = Modifier.size(16.dp))
-                }
             }
 
             Spacer(Modifier.width(4.dp))

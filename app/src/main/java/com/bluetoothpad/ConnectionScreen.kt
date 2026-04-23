@@ -1,5 +1,6 @@
 package com.bluetoothpad
 
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
@@ -89,8 +90,10 @@ fun ConnectionScreen(
     val devices = remember { mutableStateListOf<BluetoothDevice>() }
     val showUnpairConfirm = remember { mutableStateOf<BluetoothDevice?>(null) }
     val connectingAddress = remember { mutableStateOf<String?>(null) }
+    val isConnectedRef = remember { mutableStateOf(hidConnectionState == BluetoothProfile.STATE_CONNECTED) }
 
     LaunchedEffect(hidConnectionState) {
+        isConnectedRef.value = hidConnectionState == BluetoothProfile.STATE_CONNECTED
         if (hidConnectionState == BluetoothProfile.STATE_CONNECTED ||
             hidConnectionState == BluetoothProfile.STATE_DISCONNECTED
         ) {
@@ -118,7 +121,6 @@ fun ConnectionScreen(
                         }
                     }
                     BluetoothDevice.ACTION_NAME_CHANGED -> {
-                        // Device name resolved after initial scan — refresh the list entry
                         if (device != null) {
                             val idx = devices.indexOfFirst { it.address == device.address }
                             if (idx >= 0) { devices[idx] = device } else { devices.add(device) }
@@ -128,12 +130,18 @@ fun ConnectionScreen(
                         val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
                         if (device != null && state == BluetoothDevice.BOND_NONE) devices.remove(device)
                     }
+                    BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
+                        if (!isConnectedRef.value) {
+                            activity.startDiscovery()
+                        }
+                    }
                 }
             }
         }
         val filter = IntentFilter(BluetoothDevice.ACTION_FOUND).also {
             it.addAction(BluetoothDevice.ACTION_NAME_CHANGED)
             it.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+            it.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         }
         androidx.core.content.ContextCompat.registerReceiver(
             context, receiver, filter,

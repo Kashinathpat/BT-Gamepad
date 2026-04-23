@@ -161,7 +161,12 @@ fun GamepadBtn(
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()
-                        val isDown = event.changes.any { it.pressed }
+                        // Only track pointers whose position is within this component's bounds
+                        val myChanges = event.changes.filter { c ->
+                            c.position.x >= 0f && c.position.x <= size.width &&
+                            c.position.y >= 0f && c.position.y <= size.height
+                        }
+                        val isDown = myChanges.any { it.pressed }
                         if (isDown && !pressed.value) {
                             pressed.value = true
                             onDown()

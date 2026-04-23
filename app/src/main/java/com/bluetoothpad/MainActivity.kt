@@ -13,10 +13,8 @@ import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.PowerManager
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -70,9 +68,11 @@ class MainActivity : ComponentActivity() {
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        if (results.values.all { it }) {
-            initGamepad()
-        }
+        // Notification permission is optional — only require BT permissions for gamepad init
+        val btGranted = results.entries
+            .filter { it.key != Manifest.permission.POST_NOTIFICATIONS }
+            .all { it.value }
+        if (btGranted) initGamepad()
     }
 
     private val bondReceiver = object : BroadcastReceiver() {
@@ -235,26 +235,10 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        if (hasRequiredPermissions()) {
-            initGamepad()
-        }
-    }
-
-    private fun hasRequiredPermissions(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
-        } else {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        }
+        requestPermissionsAndInit()
     }
 
     private fun requestPermissionsAndInit() {
-        if (hasRequiredPermissions()) {
-            initGamepad()
-            return
-        }
         val needed = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)
@@ -267,17 +251,18 @@ class MainActivity : ComponentActivity() {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
                 needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                needed.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
         if (needed.isNotEmpty()) {
             permissionLauncher.launch(needed.toTypedArray())
+        } else {
+            initGamepad()
         }
     }
 
     fun initGamepad() {
-        val pm = getSystemService(POWER_SERVICE) as PowerManager
-        if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
-        }
-
         val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         val adapter = manager?.adapter
         if (adapter != null && !adapter.isEnabled) {
