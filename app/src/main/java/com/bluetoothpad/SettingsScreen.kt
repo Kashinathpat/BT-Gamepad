@@ -2,6 +2,7 @@ package com.bluetoothpad
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,7 +45,8 @@ fun SettingsScreen(
     appTheme: AppTheme,
     appVersion: String,
     onThemeChange: (AppTheme) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    contentPadding: PaddingValues = PaddingValues()
 ) {
     Scaffold(
         topBar = {
@@ -75,6 +77,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .padding(bottom = contentPadding.calculateBottomPadding())
                 .padding(horizontal = 16.dp)
         ) {
             Spacer(modifier = Modifier.height(16.dp))

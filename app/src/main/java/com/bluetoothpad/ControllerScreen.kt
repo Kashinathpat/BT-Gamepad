@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,8 +18,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableFloatStateOf
@@ -38,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bluetoothpad.ui.theme.BtnA
 import com.bluetoothpad.ui.theme.BtnB
-import com.bluetoothpad.ui.theme.BtnDisconnect
 import com.bluetoothpad.ui.theme.BtnPrimary
 import com.bluetoothpad.ui.theme.BtnSecondary
 import com.bluetoothpad.ui.theme.BtnX
@@ -58,168 +60,81 @@ fun ControllerScreen(
     gamepad: BluetoothHidGamepad?,
     isWindowsMode: Boolean,
     connectedDeviceName: String,
+    layout: ControllerLayout = ControllerLayout.default(),
     onStopClick: () -> Unit
 ) {
-    Box(
+    val density = LocalDensity.current.density
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(ControllerBg)
     ) {
-        // Device name + disconnect centered at top
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = if (connectedDeviceName.isNotEmpty()) connectedDeviceName else "Not connected",
-                fontSize = 11.sp,
-                color = if (connectedDeviceName.isNotEmpty()) StatusConnected else Color.Gray
-            )
-            Button(
-                onClick = onStopClick,
-                colors = ButtonDefaults.buttonColors(containerColor = BtnDisconnect),
-                modifier = Modifier.height(26.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+        val w = constraints.maxWidth.toFloat()
+        val h = constraints.maxHeight.toFloat()
+        val dim = minOf(w, h)
+
+        layout.buttons.forEach { btn ->
+            val btnPx = btn.sizeFrac * dim
+            val cx = btn.xFrac * w
+            val cy = btn.yFrac * h
+            val btnDp = (btnPx / density).dp
+            val topLeftX = (cx - btnPx / 2f).roundToInt()
+            val topLeftY = (cy - btnPx / 2f).roundToInt()
+
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(topLeftX, topLeftY) }
+                    .size(btnDp),
+                contentAlignment = Alignment.Center
             ) {
-                Text("Disconnect", fontSize = 10.sp)
+                when (btn.id) {
+                    "LSTICK" -> AnalogStick(
+                        size = btnDp,
+                        label = "L",
+                        onMove = { x, y -> gamepad?.setLeftStick(x, y) }
+                    )
+                    "RSTICK" -> AnalogStick(
+                        size = btnDp,
+                        label = "R",
+                        onMove = { x, y -> gamepad?.setRightStick(x, y) }
+                    )
+                    "DPAD" -> DpadControl(isWindowsMode = isWindowsMode, gamepad = gamepad, size = btnDp)
+                    "A"  -> GamepadBtn(label = "A",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnA,       fontSize = (btnDp.value * 0.3f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_A, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_A, false) })
+                    "B"  -> GamepadBtn(label = "B",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnB,       fontSize = (btnDp.value * 0.3f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_B, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_B, false) })
+                    "X"  -> GamepadBtn(label = "X",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnX,       fontSize = (btnDp.value * 0.3f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_X, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_X, false) })
+                    "Y"  -> GamepadBtn(label = "Y",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnY,       fontSize = (btnDp.value * 0.3f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_Y, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_Y, false) })
+                    "LB" -> GamepadBtn(label = "LB", modifier = Modifier.size(btnDp), color = BtnPrimary,  fontSize = (btnDp.value * 0.25f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LB, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LB, false) })
+                    "RB" -> GamepadBtn(label = "RB", modifier = Modifier.size(btnDp), color = BtnPrimary,  fontSize = (btnDp.value * 0.25f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RB, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RB, false) })
+                    "LT" -> GamepadBtn(label = "LT", modifier = Modifier.size(btnDp), color = BtnSecondary,fontSize = (btnDp.value * 0.25f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LT, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LT, false) })
+                    "RT" -> GamepadBtn(label = "RT", modifier = Modifier.size(btnDp), color = BtnSecondary,fontSize = (btnDp.value * 0.25f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RT, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RT, false) })
+                    "LSB"-> GamepadBtn(label = "LSB",modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnSecondary,fontSize = (btnDp.value * 0.22f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_L3, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_L3, false) })
+                    "RSB"-> GamepadBtn(label = "RSB",modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnSecondary,fontSize = (btnDp.value * 0.22f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_R3, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_R3, false) })
+                    "SELECT" -> GamepadBtn(label = "SEL", modifier = Modifier.size(btnDp), shape = RoundedCornerShape(50), color = BtnSecondary, fontSize = (btnDp.value * 0.2f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_SELECT, true) }, onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_SELECT, false) })
+                    "START"  -> GamepadBtn(label = "START",modifier = Modifier.size(btnDp), shape = RoundedCornerShape(50), color = BtnSecondary, fontSize = (btnDp.value * 0.2f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_START, true) },  onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_START, false) })
+                    else -> GamepadBtn(label = btn.label, modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnPrimary, fontSize = (btnDp.value * 0.25f).toInt(), onDown = {}, onUp = {})
+                }
             }
         }
 
-        // LB / LT stacked top-left
-        Column(
+        Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(start = 8.dp, top = 34.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            GamepadBtn(
-                label = "LB",
-                modifier = Modifier.width(80.dp).height(36.dp),
-                onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LB, true) },
-                onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LB, false) }
-            )
-            GamepadBtn(
-                label = "LT",
-                modifier = Modifier.width(80.dp).height(36.dp),
-                color = BtnSecondary,
-                onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LT, true) },
-                onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LT, false) }
-            )
-        }
-
-        // RB / RT stacked top-right
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(end = 8.dp, top = 34.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            GamepadBtn(
-                label = "RB",
-                modifier = Modifier.width(80.dp).height(36.dp),
-                onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RB, true) },
-                onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RB, false) }
-            )
-            GamepadBtn(
-                label = "RT",
-                modifier = Modifier.width(80.dp).height(36.dp),
-                color = BtnSecondary,
-                onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RT, true) },
-                onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RT, false) }
-            )
-        }
-
-        // LSB - left edge, vertically centered
-        GamepadBtn(
-            label = "LSB",
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 8.dp)
-                .size(44.dp),
-            shape = CircleShape,
-            fontSize = 10,
-            color = BtnSecondary,
-            onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_L3, true) },
-            onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_L3, false) }
-        )
-
-        // RSB - right edge, vertically centered
-        GamepadBtn(
-            label = "RSB",
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 8.dp)
-                .size(44.dp),
-            shape = CircleShape,
-            fontSize = 10,
-            color = BtnSecondary,
-            onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_R3, true) },
-            onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_R3, false) }
-        )
-
-        // Bottom-left: left stick + D-pad side by side
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 60.dp, bottom = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(top = 4.dp, start = 4.dp)
+                .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(24.dp))
+                .padding(end = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AnalogStick(
-                size = 120,
-                knobSize = 48,
-                onMove = { x, y -> gamepad?.setLeftStick(x, y) }
-            )
-            DpadControl(isWindowsMode = isWindowsMode, gamepad = gamepad)
-        }
-
-        // Bottom-right: ABXY + right stick side by side
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 60.dp, bottom = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            AbxyButtons(
-                onButton = { index, pressed -> gamepad?.setButtonState(index, pressed) }
-            )
-            AnalogStick(
-                size = 120,
-                knobSize = 48,
-                onMove = { x, y -> gamepad?.setRightStick(x, y) }
-            )
-        }
-
-        // Bottom center: SELECT + START
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            GamepadBtn(
-                label = "SELECT",
-                modifier = Modifier.width(64.dp).height(30.dp),
-                fontSize = 9,
-                shape = RoundedCornerShape(15.dp),
-                color = BtnSecondary,
-                onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_SELECT, true) },
-                onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_SELECT, false) }
-            )
-            GamepadBtn(
-                label = "START",
-                modifier = Modifier.width(64.dp).height(30.dp),
-                fontSize = 9,
-                shape = RoundedCornerShape(15.dp),
-                color = BtnSecondary,
-                onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_START, true) },
-                onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_START, false) }
-            )
+            IconButton(onClick = onStopClick, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+            }
+            if (connectedDeviceName.isNotEmpty()) {
+                Text(
+                    text = connectedDeviceName,
+                    fontSize = 11.sp,
+                    color = StatusConnected
+                )
+            }
         }
     }
 }
@@ -273,24 +188,33 @@ fun GamepadBtn(
 
 @Composable
 fun AnalogStick(
-    size: Int = 120,
-    knobSize: Int = 48,
+    size: androidx.compose.ui.unit.Dp = 120.dp,
+    label: String = "",
     onMove: (Float, Float) -> Unit
 ) {
+    val knobSize = size * 0.4f
     val density = LocalDensity.current
-    val maxOffset = with(density) { ((size.dp - knobSize.dp) / 2).toPx() }
+    val maxOffset = with(density) { ((size - knobSize) / 2).toPx() }
     val offsetX = remember { mutableFloatStateOf(0f) }
     val offsetY = remember { mutableFloatStateOf(0f) }
 
     Box(
         modifier = Modifier
-            .size(size.dp)
+            .size(size)
             .background(StickBase, CircleShape),
         contentAlignment = Alignment.Center
     ) {
+        if (label.isNotEmpty()) {
+            Text(
+                label,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White.copy(alpha = 0.4f)
+            )
+        }
         Box(
             modifier = Modifier
-                .size(knobSize.dp)
+                .size(knobSize)
                 .offset {
                     IntOffset(offsetX.floatValue.roundToInt(), offsetY.floatValue.roundToInt())
                 }
@@ -326,55 +250,51 @@ fun AnalogStick(
 }
 
 @Composable
-fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?) {
-    val activeDir = remember { mutableStateOf<DpadDir?>(null) }
+fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?, size: androidx.compose.ui.unit.Dp = 124.dp) {
+    // Track H and V axes independently so diagonals work
+    val activeH = remember { mutableStateOf<DpadDir?>(null) } // LEFT or RIGHT
+    val activeV = remember { mutableStateOf<DpadDir?>(null) } // UP or DOWN
 
-    fun press(dir: DpadDir) {
-        if (activeDir.value == dir) return
-        activeDir.value?.let { prev ->
-            if (isWindowsMode) when (prev) {
-                DpadDir.UP -> gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_UP, false)
-                DpadDir.DOWN -> gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_DOWN, false)
-                DpadDir.LEFT -> gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_LEFT, false)
-                DpadDir.RIGHT -> gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_RIGHT, false)
-            } else gamepad?.setHat(BluetoothHidGamepad.HAT_NEUTRAL)
+    fun sendState(h: DpadDir?, v: DpadDir?) {
+        if (isWindowsMode) {
+            gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_UP,    v == DpadDir.UP)
+            gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_DOWN,  v == DpadDir.DOWN)
+            gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_LEFT,  h == DpadDir.LEFT)
+            gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_RIGHT, h == DpadDir.RIGHT)
+        } else {
+            val hat = when {
+                v == DpadDir.UP    && h == null             -> BluetoothHidGamepad.HAT_UP
+                v == DpadDir.UP    && h == DpadDir.RIGHT    -> BluetoothHidGamepad.HAT_UP_RIGHT
+                v == null          && h == DpadDir.RIGHT    -> BluetoothHidGamepad.HAT_RIGHT
+                v == DpadDir.DOWN  && h == DpadDir.RIGHT    -> BluetoothHidGamepad.HAT_DOWN_RIGHT
+                v == DpadDir.DOWN  && h == null             -> BluetoothHidGamepad.HAT_DOWN
+                v == DpadDir.DOWN  && h == DpadDir.LEFT     -> BluetoothHidGamepad.HAT_DOWN_LEFT
+                v == null          && h == DpadDir.LEFT     -> BluetoothHidGamepad.HAT_LEFT
+                v == DpadDir.UP    && h == DpadDir.LEFT     -> BluetoothHidGamepad.HAT_UP_LEFT
+                else                                        -> BluetoothHidGamepad.HAT_NEUTRAL
+            }
+            gamepad?.setHat(hat)
         }
-        activeDir.value = dir
-        if (isWindowsMode) when (dir) {
-            DpadDir.UP -> gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_UP, true)
-            DpadDir.DOWN -> gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_DOWN, true)
-            DpadDir.LEFT -> gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_LEFT, true)
-            DpadDir.RIGHT -> gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_RIGHT, true)
-        } else when (dir) {
-            DpadDir.UP -> gamepad?.setHat(BluetoothHidGamepad.HAT_UP)
-            DpadDir.DOWN -> gamepad?.setHat(BluetoothHidGamepad.HAT_DOWN)
-            DpadDir.LEFT -> gamepad?.setHat(BluetoothHidGamepad.HAT_LEFT)
-            DpadDir.RIGHT -> gamepad?.setHat(BluetoothHidGamepad.HAT_RIGHT)
+    }
+
+    fun update(x: Float, y: Float, cx: Float, cy: Float) {
+        val dx = x - cx
+        val dy = y - cy
+        val dead = cx * 0.25f
+        val newH = when { dx > dead -> DpadDir.RIGHT; dx < -dead -> DpadDir.LEFT; else -> null }
+        val newV = when { dy < -dead -> DpadDir.UP;   dy > dead  -> DpadDir.DOWN; else -> null }
+        if (newH != activeH.value || newV != activeV.value) {
+            activeH.value = newH
+            activeV.value = newV
+            sendState(newH, newV)
         }
     }
 
     fun release() {
-        activeDir.value?.let { prev ->
-            if (isWindowsMode) when (prev) {
-                DpadDir.UP -> gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_UP, false)
-                DpadDir.DOWN -> gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_DOWN, false)
-                DpadDir.LEFT -> gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_LEFT, false)
-                DpadDir.RIGHT -> gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_RIGHT, false)
-            } else gamepad?.setHat(BluetoothHidGamepad.HAT_NEUTRAL)
-        }
-        activeDir.value = null
-    }
-
-    fun dirFromOffset(x: Float, y: Float, cx: Float, cy: Float): DpadDir? {
-        val dx = x - cx
-        val dy = y - cy
-        val totalSize = cx * 2
-        val dead = totalSize * 0.15f
-        if (abs(dx) < dead && abs(dy) < dead) return null
-        return if (abs(dx) > abs(dy)) {
-            if (dx > 0) DpadDir.RIGHT else DpadDir.LEFT
-        } else {
-            if (dy > 0) DpadDir.DOWN else DpadDir.UP
+        if (activeH.value != null || activeV.value != null) {
+            activeH.value = null
+            activeV.value = null
+            sendState(null, null)
         }
     }
 
@@ -384,8 +304,6 @@ fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?) {
         DpadDir.LEFT  to Alignment.CenterStart,
         DpadDir.RIGHT to Alignment.CenterEnd
     )
-    // Drawable tip points UP. Rotate so tip points inward:
-    // UP@top → 180°, DOWN@bottom → 0°, LEFT@left → 90°, RIGHT@right → 270°
     val rotations = mapOf(
         DpadDir.UP    to 180f,
         DpadDir.DOWN  to 0f,
@@ -395,7 +313,7 @@ fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?) {
 
     Box(
         modifier = Modifier
-            .size(124.dp)
+            .size(size)
             .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {
@@ -403,8 +321,7 @@ fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?) {
                         val anyPressed = event.changes.any { it.pressed }
                         if (anyPressed) {
                             val pos = event.changes.first { it.pressed }.position
-                            val dir = dirFromOffset(pos.x, pos.y, size.width / 2f, size.height / 2f)
-                            if (dir != null) press(dir) else release()
+                            update(pos.x, pos.y, this.size.width / 2f, this.size.height / 2f)
                         } else {
                             release()
                         }
@@ -413,11 +330,12 @@ fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?) {
             },
         contentAlignment = Alignment.Center
     ) {
-        val active = activeDir.value
-        val arrowSize = 56.dp
-        val inset = 8.dp
+        val h = activeH.value
+        val v = activeV.value
+        val arrowSize = size * 0.45f
+        val inset = size * 0.065f
         arms.forEach { (dir, anchor) ->
-            val tint = if (active == dir) DpadPressed else DpadNormal
+            val tint = if (dir == h || dir == v) DpadPressed else DpadNormal
             val offsetMod = when (dir) {
                 DpadDir.UP    -> Modifier.offset(y = inset)
                 DpadDir.DOWN  -> Modifier.offset(y = -inset)

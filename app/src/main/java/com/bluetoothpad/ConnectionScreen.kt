@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -77,7 +78,8 @@ fun ConnectionScreen(
     onUnpairDevice: (BluetoothDevice) -> Unit,
     onConnectDevice: (BluetoothDevice) -> Unit,
     onCancelConnect: (BluetoothDevice) -> Unit,
-    onSettingsClick: () -> Unit
+    onSettingsClick: () -> Unit,
+    contentPadding: PaddingValues = PaddingValues()
 ) {
     val context = LocalContext.current
     val cs = MaterialTheme.colorScheme
@@ -366,7 +368,8 @@ fun ConnectionScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(cs.surfaceContainerLow)
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .padding(bottom = contentPadding.calculateBottomPadding()),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 if (ownDeviceName.isNotEmpty()) {

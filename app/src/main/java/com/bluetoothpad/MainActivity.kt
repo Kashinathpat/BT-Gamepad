@@ -23,7 +23,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -32,9 +43,12 @@ import com.bluetoothpad.ui.theme.AppTheme
 import com.bluetoothpad.ui.theme.BluetoothPadTheme
 import java.lang.reflect.Method
 
+enum class NavTab { CONNECT, LAYOUTS, SETTINGS }
+
 class MainActivity : ComponentActivity() {
 
     private val connected = mutableStateOf(false)
+    private val controllerVisible = mutableStateOf(false)
     private val hidProfileConnected = mutableStateOf(false)
     private val hidAppRegistered = mutableStateOf(false)
     private val hidConnectionState = mutableStateOf(BluetoothProfile.STATE_DISCONNECTED)
@@ -42,11 +56,15 @@ class MainActivity : ComponentActivity() {
     private val ownDeviceName = mutableStateOf("")
     private val isWindowsMode = mutableStateOf(false)
     private val appTheme = mutableStateOf(AppTheme.SYSTEM)
-    private val showSettings = mutableStateOf(false)
+    private val currentTab = mutableStateOf(NavTab.CONNECT)
+    private val activeLayoutId = mutableStateOf(ControllerLayout.DEFAULT_ID)
+    private val editingLayout = mutableStateOf<ControllerLayout?>(null)
+    private val layoutsRefreshKey = mutableStateOf(0)
 
     private var gamepad: BluetoothHidGamepad? = null
     private var userCancelledConnect = false
     lateinit var prefs: SharedPreferences
+    lateinit var layoutRepo: LayoutRepository
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -70,7 +88,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("data", MODE_PRIVATE)
+        layoutRepo = LayoutRepository(prefs)
         isWindowsMode.value = prefs.getBoolean("isWindowsDInputMode", false)
+        activeLayoutId.value = prefs.getString("activeLayoutId", ControllerLayout.DEFAULT_ID) ?: ControllerLayout.DEFAULT_ID
         appTheme.value = when (prefs.getString("appTheme", "SYSTEM")) {
             "LIGHT"  -> AppTheme.LIGHT
             "DARK"   -> AppTheme.DARK
@@ -82,13 +102,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             BluetoothPadTheme(appTheme = appTheme.value) {
-                requestedOrientation = if (connected.value) {
+                requestedOrientation = if (controllerVisible.value || editingLayout.value != null) {
                     ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                 } else {
                     ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                 }
 
-                if (connected.value) {
+                if (controllerVisible.value) {
                     val controller = WindowCompat.getInsetsController(window, window.decorView)
                     controller.hide(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
                     controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -97,46 +117,103 @@ class MainActivity : ComponentActivity() {
                         gamepad = gamepad,
                         isWindowsMode = isWindowsMode.value,
                         connectedDeviceName = connectedDeviceName.value,
-                        onStopClick = { stopGamepad() }
+                        layout = layoutRepo.load(activeLayoutId.value) ?: ControllerLayout.default(),
+                        onStopClick = {
+                            controllerVisible.value = false
+                        }
+                    )
+                } else if (editingLayout.value != null) {
+                    val controller = WindowCompat.getInsetsController(window, window.decorView)
+                    controller.hide(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+                    controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    LayoutEditorScreen(
+                        layout = editingLayout.value!!,
+                        repo = layoutRepo,
+                        onBack = {
+                            editingLayout.value = null
+                            layoutsRefreshKey.value++
+                        }
                     )
                 } else {
                     val controller = WindowCompat.getInsetsController(window, window.decorView)
                     controller.show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
                     window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    if (showSettings.value) {
-                        SettingsScreen(
-                            appTheme = appTheme.value,
-                            appVersion = "1.0",
-                            onThemeChange = { theme ->
-                                appTheme.value = theme
-                                prefs.edit().putString("appTheme", theme.name).apply()
-                            },
-                            onBack = { showSettings.value = false }
-                        )
-                    } else {
-                        ConnectionScreen(
-                            activity = this,
-                            hidProfileConnected = hidProfileConnected.value,
-                            hidAppRegistered = hidAppRegistered.value,
-                            hidConnectionState = hidConnectionState.value,
-                            connectedDeviceName = connectedDeviceName.value,
-                            ownDeviceName = ownDeviceName.value,
-                            isWindowsMode = isWindowsMode.value,
-                            onStartClick = { requestPermissionsAndInit(); reconnectLastDevice() },
-                            onWindowsModeToggle = { value ->
-                                isWindowsMode.value = value
-                                prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
-                            },
-                            onPairDevice = { device -> pairDevice(device) },
-                            onUnpairDevice = { device -> unpairDevice(device) },
-                            onConnectDevice = { device -> gamepad?.connectDevice(device) },
-                            onCancelConnect = { device ->
-                                userCancelledConnect = true
-                                gamepad?.cancelConnect(device)
-                            },
-                            onSettingsClick = { showSettings.value = true }
-                        )
-                    }
+
+                    val cs = MaterialTheme.colorScheme
+                        Scaffold(
+                            bottomBar = {
+                                NavigationBar(containerColor = cs.surfaceContainer) {
+                                    NavigationBarItem(
+                                        selected = currentTab.value == NavTab.CONNECT,
+                                        onClick = { currentTab.value = NavTab.CONNECT },
+                                        icon = { Icon(Icons.Default.Wifi, contentDescription = null) },
+                                        label = { Text("Connect", fontWeight = FontWeight.Medium) }
+                                    )
+                                    NavigationBarItem(
+                                        selected = currentTab.value == NavTab.LAYOUTS,
+                                        onClick = { currentTab.value = NavTab.LAYOUTS },
+                                        icon = { Icon(Icons.Default.GridView, contentDescription = null) },
+                                        label = { Text("Layouts", fontWeight = FontWeight.Medium) }
+                                    )
+                                    NavigationBarItem(
+                                        selected = currentTab.value == NavTab.SETTINGS,
+                                        onClick = { currentTab.value = NavTab.SETTINGS },
+                                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                        label = { Text("Settings", fontWeight = FontWeight.Medium) }
+                                    )
+                                }
+                            }
+                        ) { innerPadding ->
+                            when (currentTab.value) {
+                                NavTab.CONNECT -> ConnectionScreen(
+                                    activity = this@MainActivity,
+                                    hidProfileConnected = hidProfileConnected.value,
+                                    hidAppRegistered = hidAppRegistered.value,
+                                    hidConnectionState = hidConnectionState.value,
+                                    connectedDeviceName = connectedDeviceName.value,
+                                    ownDeviceName = ownDeviceName.value,
+                                    isWindowsMode = isWindowsMode.value,
+                                    onStartClick = { requestPermissionsAndInit(); reconnectLastDevice() },
+                                    onWindowsModeToggle = { value ->
+                                        isWindowsMode.value = value
+                                        prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
+                                    },
+                                    onPairDevice = { device -> pairDevice(device) },
+                                    onUnpairDevice = { device -> unpairDevice(device) },
+                                    onConnectDevice = { device -> gamepad?.connectDevice(device) },
+                                    onCancelConnect = { device ->
+                                        userCancelledConnect = true
+                                        gamepad?.cancelConnect(device)
+                                    },
+                                    onSettingsClick = { currentTab.value = NavTab.SETTINGS },
+                                    contentPadding = innerPadding
+                                )
+                                NavTab.LAYOUTS -> androidx.compose.runtime.key(layoutsRefreshKey.value) {
+                                    LayoutsScreen(
+                                        repo = layoutRepo,
+                                        connectedDeviceName = connectedDeviceName.value,
+                                        onStart = { layout ->
+                                            activeLayoutId.value = layout.id
+                                            prefs.edit().putString("activeLayoutId", layout.id).apply()
+                                            controllerVisible.value = true
+                                        },
+                                        onEdit = { layout -> editingLayout.value = layout },
+                                        contentPadding = innerPadding
+                                    )
+                                }
+                                NavTab.SETTINGS -> SettingsScreen(
+                                    appTheme = appTheme.value,
+                                    appVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: "",
+                                    onThemeChange = { theme ->
+                                        appTheme.value = theme
+                                        prefs.edit().putString("appTheme", theme.name).apply()
+                                    },
+                                    onBack = { currentTab.value = NavTab.CONNECT },
+                                    contentPadding = innerPadding
+                                )
+                            }
+                        }
                 }
             }
         }
@@ -233,6 +310,7 @@ class MainActivity : ComponentActivity() {
         gamepad?.stop()
         gamepad = null
         connected.value = false
+        controllerVisible.value = false
         hidProfileConnected.value = false
         hidAppRegistered.value = false
         hidConnectionState.value = BluetoothProfile.STATE_DISCONNECTED
