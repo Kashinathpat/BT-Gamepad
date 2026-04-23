@@ -49,7 +49,12 @@ import com.bluetoothpad.ui.theme.BtnSecondary
 import com.bluetoothpad.ui.theme.BtnX
 import com.bluetoothpad.ui.theme.BtnY
 import com.bluetoothpad.ui.theme.ControllerBg
+import com.bluetoothpad.ui.theme.ControllerOnBtn
 import com.bluetoothpad.ui.theme.DpadNormal
+import com.bluetoothpad.ui.theme.EditorDelete
+import com.bluetoothpad.ui.theme.EditorSave
+import com.bluetoothpad.ui.theme.EditorSelected
+import com.bluetoothpad.ui.theme.OverlayPill
 import com.bluetoothpad.ui.theme.StickBase
 import com.bluetoothpad.ui.theme.StickKnob
 import kotlinx.coroutines.launch
@@ -94,7 +99,7 @@ fun LayoutEditorScreen(
                         .offset { IntOffset(topLeftX, topLeftY) }
                         .size(btnDp)
                         .then(
-                            if (isSelected) Modifier.border(2.dp, Color.Yellow, CircleShape)
+                            if (isSelected) Modifier.border(2.dp, EditorSelected, CircleShape)
                             else Modifier
                         )
                         .pointerInput(btn.id) {
@@ -121,19 +126,19 @@ fun LayoutEditorScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 12.dp)
-                .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(24.dp))
+                .background(OverlayPill, RoundedCornerShape(24.dp))
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = ControllerOnBtn)
             }
 
             Text(
                 layout.name,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.White,
+                color = ControllerOnBtn,
                 modifier = Modifier.padding(horizontal = 6.dp)
             )
 
@@ -143,7 +148,7 @@ fun LayoutEditorScreen(
                 Text(
                     "${sel.label}  ${"%.0f".format(sel.sizeFrac * 100)}%",
                     fontSize = 11.sp,
-                    color = Color.Yellow
+                    color = EditorSelected
                 )
                 Spacer(Modifier.width(4.dp))
                 IconButton(
@@ -153,7 +158,7 @@ fun LayoutEditorScreen(
                     },
                     modifier = Modifier.size(30.dp)
                 ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color(0xFFFF6B6B), modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = EditorDelete, modifier = Modifier.size(16.dp))
                 }
             }
 
@@ -165,7 +170,7 @@ fun LayoutEditorScreen(
                 },
                 modifier = Modifier.size(36.dp)
             ) {
-                Icon(Icons.Default.Check, contentDescription = "Save", tint = Color(0xFF69F0AE))
+                Icon(Icons.Default.Check, contentDescription = "Save", tint = EditorSave)
             }
         }
 
@@ -201,7 +206,7 @@ private fun EditorButton(btn: ButtonConfig, sizeDp: Float) {
                     if (btn.id == "LSTICK") "L" else "R",
                     fontSize = (sizeDp * 0.22f).sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White.copy(alpha = 0.7f)
+                    color = ControllerOnBtn.copy(alpha = 0.7f)
                 )
             }
         }
@@ -256,7 +261,7 @@ private fun EditorButton(btn: ButtonConfig, sizeDp: Float) {
                     .background(color, RoundedCornerShape(8.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(btn.label, fontSize = labelFontSp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(btn.label, fontSize = labelFontSp, fontWeight = FontWeight.Bold, color = ControllerOnBtn)
             }
         }
 
@@ -267,7 +272,7 @@ private fun EditorButton(btn: ButtonConfig, sizeDp: Float) {
                     .background(BtnSecondary, RoundedCornerShape(50)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(btn.label, fontSize = (sizeDp * 0.18f).sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, softWrap = false)
+                Text(btn.label, fontSize = (sizeDp * 0.18f).sp, fontWeight = FontWeight.Bold, color = ControllerOnBtn, maxLines = 1, softWrap = false)
             }
         }
 
@@ -283,6 +288,6 @@ private fun CircleBtn(color: Color, label: String, sizeDp: Float, fontScale: Flo
             .background(color, CircleShape),
         contentAlignment = Alignment.Center
     ) {
-        Text(label, fontSize = (sizeDp * fontScale).sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, softWrap = false)
+        Text(label, fontSize = (sizeDp * fontScale).sp, fontWeight = FontWeight.Bold, color = ControllerOnBtn, maxLines = 1, softWrap = false)
     }
 }

@@ -95,3 +95,16 @@ val BtnA = Color(0xFF1B5E20)
 val BtnB = Color(0xFFB71C1C)
 val BtnX = Color(0xFF0D47A1)
 val BtnY = Color(0xFFF57F17)
+
+// Overlay pill background (controller + editor floating bars)
+val OverlayPill       = Color(0x8C000000)  // Black 55%
+val OverlayPillLight  = Color(0x73000000)  // Black 45%
+
+// Editor UI accents
+val EditorSelected    = Color(0xFFFFEB3B)  // Yellow — selected button border + info text
+val EditorSave        = Color(0xFF69F0AE)  // Green — save checkmark
+val EditorDelete      = Color(0xFFFF6B6B)  // Red — delete icon
+
+// On-controller text
+val ControllerOnBtn   = Color(0xFFFFFFFF)  // White — button labels
+val StickLabel        = Color(0x66FFFFFF)  // White 40% — faint L/R label inside stick base

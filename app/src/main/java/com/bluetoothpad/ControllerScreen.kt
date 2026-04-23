@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,7 +14,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -42,6 +40,9 @@ import androidx.compose.ui.unit.sp
 import com.bluetoothpad.ui.theme.BtnA
 import com.bluetoothpad.ui.theme.BtnB
 import com.bluetoothpad.ui.theme.BtnPrimary
+import com.bluetoothpad.ui.theme.ControllerOnBtn
+import com.bluetoothpad.ui.theme.OverlayPillLight
+import com.bluetoothpad.ui.theme.StickLabel
 import com.bluetoothpad.ui.theme.BtnSecondary
 import com.bluetoothpad.ui.theme.BtnX
 import com.bluetoothpad.ui.theme.BtnY
@@ -51,7 +52,6 @@ import com.bluetoothpad.ui.theme.DpadPressed
 import com.bluetoothpad.ui.theme.StatusConnected
 import com.bluetoothpad.ui.theme.StickBase
 import com.bluetoothpad.ui.theme.StickKnob
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -121,12 +121,12 @@ fun ControllerScreen(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(top = 4.dp, start = 4.dp)
-                .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(24.dp))
+                .background(OverlayPillLight, RoundedCornerShape(24.dp))
                 .padding(end = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onStopClick, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = ControllerOnBtn)
             }
             if (connectedDeviceName.isNotEmpty()) {
                 Text(
@@ -178,7 +178,7 @@ fun GamepadBtn(
                 text = label,
                 fontSize = fontSize.sp,
                 fontWeight = fontWeight,
-                color = Color.White,
+                color = ControllerOnBtn,
                 maxLines = 1,
                 softWrap = false
             )
@@ -209,7 +209,7 @@ fun AnalogStick(
                 label,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White.copy(alpha = 0.4f)
+                color = StickLabel
             )
         }
         Box(
