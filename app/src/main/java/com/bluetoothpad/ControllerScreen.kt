@@ -240,9 +240,15 @@ fun AnalogStick(
                             newX = newX / dist * maxOffset
                             newY = newY / dist * maxOffset
                         }
+                        val nx = newX / maxOffset
+                        val ny = newY / maxOffset
+                        val prevX = offsetX.floatValue / maxOffset
+                        val prevY = offsetY.floatValue / maxOffset
                         offsetX.floatValue = newX
                         offsetY.floatValue = newY
-                        onMove(newX / maxOffset, newY / maxOffset)
+                        if (kotlin.math.abs(nx - prevX) > 0.01f || kotlin.math.abs(ny - prevY) > 0.01f) {
+                            onMove(nx, ny)
+                        }
                     }
                 }
         )

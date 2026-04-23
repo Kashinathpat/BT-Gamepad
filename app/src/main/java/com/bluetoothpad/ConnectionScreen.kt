@@ -6,6 +6,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,7 +26,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -78,7 +78,6 @@ fun ConnectionScreen(
     onUnpairDevice: (BluetoothDevice) -> Unit,
     onConnectDevice: (BluetoothDevice) -> Unit,
     onCancelConnect: (BluetoothDevice) -> Unit,
-    onSettingsClick: () -> Unit,
     contentPadding: PaddingValues = PaddingValues()
 ) {
     val context = LocalContext.current
@@ -103,14 +102,20 @@ fun ConnectionScreen(
             override fun onReceive(ctx: Context, intent: Intent) {
                 when (intent.action) {
                     BluetoothDevice.ACTION_FOUND -> {
-                        val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                        else
+                            @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                         if (device != null && !devices.contains(device)) {
                             try { if (device.name != null) devices.add(device) }
                             catch (_: SecurityException) { devices.add(device) }
                         }
                     }
                     BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
-                        val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                        else
+                            @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                         val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
                         if (device != null && state == BluetoothDevice.BOND_NONE) devices.remove(device)
                     }
@@ -137,11 +142,6 @@ fun ConnectionScreen(
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
-                },
-                actions = {
-                    IconButton(onClick = onSettingsClick) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White)
-                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = if (isDark) TopBarBgDark else TopBarBg

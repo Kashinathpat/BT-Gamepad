@@ -7,7 +7,10 @@ import android.bluetooth.BluetoothHidDeviceAppQosSettings
 import android.bluetooth.BluetoothHidDeviceAppSdpSettings
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.util.Log
 import android.widget.Toast
 import java.util.concurrent.Executors
@@ -121,6 +124,21 @@ class BluetoothHidGamepad(private val context: Context) {
 
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var hidDevice: BluetoothHidDevice? = null
+    private val btStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            if (intent.action != BluetoothAdapter.ACTION_STATE_CHANGED) return
+            val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+            if (state == BluetoothAdapter.STATE_TURNING_OFF || state == BluetoothAdapter.STATE_OFF) {
+                hidDevice = null
+                connectedDevice = null
+                isConnected = false
+                isAppRegistered = false
+                connectionState = BluetoothProfile.STATE_DISCONNECTED
+                Log.d(TAG, "BT turned off — state reset")
+                onStatusChanged?.invoke()
+            }
+        }
+    }
     var connectedDevice: BluetoothDevice? = null
         private set
 
@@ -158,9 +176,10 @@ class BluetoothHidGamepad(private val context: Context) {
                 } catch (_: SecurityException) {
                     device?.address ?: "Unknown"
                 }
-                // Send neutral report on connect
+                // Full neutral report on connect — zero all bytes then set hat neutral
+                report.fill(0)
                 if (!isWindowsDInputMode) {
-                    report[1] = ((report[1].toInt() and 0x0F) or ((HAT_NEUTRAL and 0x0F) shl 4)).toByte()
+                    report[1] = ((HAT_NEUTRAL and 0x0F) shl 4).toByte()
                 }
                 sendReport()
             } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
@@ -203,12 +222,22 @@ class BluetoothHidGamepad(private val context: Context) {
         } catch (_: SecurityException) {
             "Unknown"
         }
+        context.registerReceiver(btStateReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
         return try {
             bluetoothAdapter!!.getProfileProxy(context, profileListener, BluetoothProfile.HID_DEVICE)
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException starting HID", e)
             false
         }
+    }
+
+    fun switchMode(windowsDInput: Boolean) {
+        if (isWindowsDInputMode == windowsDInput) return
+        isWindowsDInputMode = windowsDInput
+        report.fill(0)
+        val hid = hidDevice ?: return
+        try { hid.unregisterApp() } catch (e: SecurityException) { Log.e(TAG, "SecurityException unregisterApp", e) }
+        registerApp()
     }
 
     private fun registerApp() {
@@ -303,6 +332,7 @@ class BluetoothHidGamepad(private val context: Context) {
     }
 
     fun stop() {
+        try { context.unregisterReceiver(btStateReceiver) } catch (_: Exception) {}
         try {
             hidDevice?.unregisterApp()
         } catch (e: SecurityException) {

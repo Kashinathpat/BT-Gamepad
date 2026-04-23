@@ -77,7 +77,11 @@ class MainActivity : ComponentActivity() {
     private val bondReceiver = object : BroadcastReceiver() {
         override fun onReceive(_context: Context, intent: Intent) {
             if (intent.action != BluetoothDevice.ACTION_BOND_STATE_CHANGED) return
-            val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+            val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+            else
+                @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+            device ?: return
             val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
             if (state == BluetoothDevice.BOND_BONDED) {
                 gamepad?.connectDevice(device)
@@ -178,6 +182,7 @@ class MainActivity : ComponentActivity() {
                                     onWindowsModeToggle = { value ->
                                         isWindowsMode.value = value
                                         prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
+                                        gamepad?.switchMode(value)
                                     },
                                     onPairDevice = { device -> pairDevice(device) },
                                     onUnpairDevice = { device -> unpairDevice(device) },
@@ -186,7 +191,6 @@ class MainActivity : ComponentActivity() {
                                         userCancelledConnect = true
                                         gamepad?.cancelConnect(device)
                                     },
-                                    onSettingsClick = { currentTab.value = NavTab.SETTINGS },
                                     contentPadding = innerPadding
                                 )
                                 NavTab.LAYOUTS -> androidx.compose.runtime.key(layoutsRefreshKey.value) {
