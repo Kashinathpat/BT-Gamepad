@@ -23,6 +23,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -197,6 +198,7 @@ fun AnalogStick(
     val maxOffset = with(density) { ((size - knobSize) / 2).toPx() }
     val offsetX = remember { mutableFloatStateOf(0f) }
     val offsetY = remember { mutableFloatStateOf(0f) }
+    val lastReportMs = remember { mutableLongStateOf(0L) }
 
     Box(
         modifier = Modifier
@@ -240,14 +242,12 @@ fun AnalogStick(
                             newX = newX / dist * maxOffset
                             newY = newY / dist * maxOffset
                         }
-                        val nx = newX / maxOffset
-                        val ny = newY / maxOffset
-                        val prevX = offsetX.floatValue / maxOffset
-                        val prevY = offsetY.floatValue / maxOffset
                         offsetX.floatValue = newX
                         offsetY.floatValue = newY
-                        if (kotlin.math.abs(nx - prevX) > 0.01f || kotlin.math.abs(ny - prevY) > 0.01f) {
-                            onMove(nx, ny)
+                        val now = System.currentTimeMillis()
+                        if (now - lastReportMs.longValue >= 10L) {
+                            lastReportMs.longValue = now
+                            onMove(newX / maxOffset, newY / maxOffset)
                         }
                     }
                 }

@@ -56,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
+import com.bluetoothpad.ui.theme.ControllerOnBtn
 import com.bluetoothpad.ui.theme.StatusConnected
 import com.bluetoothpad.ui.theme.StatusConnecting
 import com.bluetoothpad.ui.theme.StatusError
@@ -76,8 +77,10 @@ fun ConnectionScreen(
     onWindowsModeToggle: (Boolean) -> Unit,
     onPairDevice: (BluetoothDevice) -> Unit,
     onUnpairDevice: (BluetoothDevice) -> Unit,
+    connectedDeviceAddress: String = "",
     onConnectDevice: (BluetoothDevice) -> Unit,
     onCancelConnect: (BluetoothDevice) -> Unit,
+    onDisconnectDevice: (BluetoothDevice) -> Unit,
     contentPadding: PaddingValues = PaddingValues()
 ) {
     val context = LocalContext.current
@@ -93,6 +96,9 @@ fun ConnectionScreen(
         ) {
             connectingAddress.value = null
         }
+        if (hidConnectionState == BluetoothProfile.STATE_CONNECTED) {
+            activity.cancelDiscovery()
+        }
     }
 
     DisposableEffect(Unit) {
@@ -100,22 +106,25 @@ fun ConnectionScreen(
         devices.addAll(activity.getBondedDevices())
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
+                val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                    intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                else
+                    @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                 when (intent.action) {
                     BluetoothDevice.ACTION_FOUND -> {
-                        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-                        else
-                            @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                         if (device != null && !devices.contains(device)) {
-                            try { if (device.name != null) devices.add(device) }
-                            catch (_: SecurityException) { devices.add(device) }
+                            try { devices.add(device) }
+                            catch (_: SecurityException) { }
+                        }
+                    }
+                    BluetoothDevice.ACTION_NAME_CHANGED -> {
+                        // Device name resolved after initial scan — refresh the list entry
+                        if (device != null) {
+                            val idx = devices.indexOfFirst { it.address == device.address }
+                            if (idx >= 0) { devices[idx] = device } else { devices.add(device) }
                         }
                     }
                     BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
-                        val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-                        else
-                            @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
                         val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
                         if (device != null && state == BluetoothDevice.BOND_NONE) devices.remove(device)
                     }
@@ -123,9 +132,13 @@ fun ConnectionScreen(
             }
         }
         val filter = IntentFilter(BluetoothDevice.ACTION_FOUND).also {
+            it.addAction(BluetoothDevice.ACTION_NAME_CHANGED)
             it.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
         }
-        context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        androidx.core.content.ContextCompat.registerReceiver(
+            context, receiver, filter,
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+        )
         activity.startDiscovery()
         onDispose {
             activity.cancelDiscovery()
@@ -245,8 +258,13 @@ fun ConnectionScreen(
                     val isPaired = try { device.bondState == BluetoothDevice.BOND_BONDED } catch (_: SecurityException) { false }
                     val address = try { device.address } catch (_: SecurityException) { "" }
                     val isConnecting = connectingAddress.value == address
+                    val isConnected = connectedDeviceAddress.isNotEmpty() && address == connectedDeviceAddress
 
-                    val cardBg = if (isConnecting) cs.primaryContainer.copy(alpha = 0.4f) else cs.surfaceContainer
+                    val cardBg = when {
+                        isConnected  -> StatusConnected.copy(alpha = 0.12f)
+                        isConnecting -> cs.primaryContainer.copy(alpha = 0.4f)
+                        else         -> cs.surfaceContainer
+                    }
                     val cardShape = RoundedCornerShape(16.dp)
 
                     Column(
@@ -299,17 +317,25 @@ fun ConnectionScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Button(
                                         onClick = {
-                                            if (isConnecting) {
-                                                connectingAddress.value = null
-                                                onCancelConnect(device)
-                                            } else {
-                                                connectingAddress.value = address
-                                                onConnectDevice(device)
+                                            when {
+                                                isConnected -> onDisconnectDevice(device)
+                                                isConnecting -> {
+                                                    connectingAddress.value = null
+                                                    onCancelConnect(device)
+                                                }
+                                                else -> {
+                                                    connectingAddress.value = address
+                                                    onConnectDevice(device)
+                                                }
                                             }
                                         },
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (isConnecting) cs.error else cs.primary,
-                                            contentColor = if (isConnecting) cs.onError else cs.onPrimary
+                                            containerColor = when {
+                                                isConnected  -> StatusConnected
+                                                isConnecting -> cs.error
+                                                else         -> cs.primary
+                                            },
+                                            contentColor = ControllerOnBtn
                                         ),
                                         shape = RoundedCornerShape(10.dp),
                                         contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -318,7 +344,11 @@ fun ConnectionScreen(
                                         modifier = Modifier.height(36.dp)
                                     ) {
                                         Text(
-                                            if (isConnecting) "Cancel" else "Connect",
+                                            when {
+                                                isConnected  -> "Disconnect"
+                                                isConnecting -> "Cancel"
+                                                else         -> "Connect"
+                                            },
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )

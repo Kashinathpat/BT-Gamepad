@@ -159,11 +159,18 @@ class BluetoothHidGamepad(private val context: Context) {
 
     var onStatusChanged: (() -> Unit)? = null
 
+    private var pendingReRegister = false
+
     private val hidCallback = object : BluetoothHidDevice.Callback() {
         override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
             isAppRegistered = registered
             Log.d(TAG, "onAppStatusChanged registered=$registered device=${pluggedDevice?.address}")
-            onStatusChanged?.invoke()
+            if (!registered && pendingReRegister) {
+                pendingReRegister = false
+                registerApp()
+            } else {
+                onStatusChanged?.invoke()
+            }
         }
 
         override fun onConnectionStateChanged(device: BluetoothDevice?, state: Int) {
@@ -236,8 +243,14 @@ class BluetoothHidGamepad(private val context: Context) {
         isWindowsDInputMode = windowsDInput
         report.fill(0)
         val hid = hidDevice ?: return
-        try { hid.unregisterApp() } catch (e: SecurityException) { Log.e(TAG, "SecurityException unregisterApp", e) }
-        registerApp()
+        pendingReRegister = true
+        try {
+            hid.unregisterApp()
+        } catch (e: SecurityException) {
+            Log.e(TAG, "SecurityException unregisterApp in switchMode", e)
+            pendingReRegister = false
+            registerApp()
+        }
     }
 
     private fun registerApp() {
@@ -288,6 +301,8 @@ class BluetoothHidGamepad(private val context: Context) {
 
     fun setButtonState(index: Int, pressed: Boolean) {
         require(index in 0..15) { "Button index out of range: $index" }
+        // Indices 12-15 are DInput-only dpad buttons; in HID mode they would corrupt hat bits in report[1]
+        if (index > 11 && !isWindowsDInputMode) return
         val byteIndex = index / 8
         val bitMask = 1 shl (index % 8)
         if (pressed) {

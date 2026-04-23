@@ -33,6 +33,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.ContextCompat
@@ -101,22 +102,36 @@ class MainActivity : ComponentActivity() {
             else     -> AppTheme.SYSTEM
         }
 
-        registerReceiver(bondReceiver, IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED), RECEIVER_EXPORTED)
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, bondReceiver,
+            IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED),
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+        )
 
         enableEdgeToEdge()
         setContent {
             BluetoothPadTheme(appTheme = appTheme.value) {
-                requestedOrientation = if (controllerVisible.value || editingLayout.value != null) {
-                    ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                } else {
-                    ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                val isFullScreen = controllerVisible.value || editingLayout.value != null
+                SideEffect {
+                    requestedOrientation = if (isFullScreen)
+                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    else
+                        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+
+                    val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+                    if (isFullScreen) {
+                        insetsController.hide(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+                        insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    } else {
+                        insetsController.show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+                    }
+                    if (controllerVisible.value)
+                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    else
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 }
 
                 if (controllerVisible.value) {
-                    val controller = WindowCompat.getInsetsController(window, window.decorView)
-                    controller.hide(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
-                    controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     ControllerScreen(
                         gamepad = gamepad,
                         isWindowsMode = isWindowsMode.value,
@@ -127,10 +142,6 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                 } else if (editingLayout.value != null) {
-                    val controller = WindowCompat.getInsetsController(window, window.decorView)
-                    controller.hide(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
-                    controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     LayoutEditorScreen(
                         layout = editingLayout.value!!,
                         repo = layoutRepo,
@@ -140,9 +151,6 @@ class MainActivity : ComponentActivity() {
                         }
                     )
                 } else {
-                    val controller = WindowCompat.getInsetsController(window, window.decorView)
-                    controller.show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
                     val cs = MaterialTheme.colorScheme
                         Scaffold(
@@ -186,8 +194,13 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onPairDevice = { device -> pairDevice(device) },
                                     onUnpairDevice = { device -> unpairDevice(device) },
+                                    connectedDeviceAddress = gamepad?.connectedDevice?.address ?: "",
                                     onConnectDevice = { device -> gamepad?.connectDevice(device) },
                                     onCancelConnect = { device ->
+                                        userCancelledConnect = true
+                                        gamepad?.cancelConnect(device)
+                                    },
+                                    onDisconnectDevice = { device ->
                                         userCancelledConnect = true
                                         gamepad?.cancelConnect(device)
                                     },
@@ -230,7 +243,8 @@ class MainActivity : ComponentActivity() {
     private fun hasRequiredPermissions(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) == PackageManager.PERMISSION_GRANTED
         } else {
             ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         }
@@ -247,6 +261,8 @@ class MainActivity : ComponentActivity() {
                 needed.add(Manifest.permission.BLUETOOTH_CONNECT)
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED)
                 needed.add(Manifest.permission.BLUETOOTH_SCAN)
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED)
+                needed.add(Manifest.permission.BLUETOOTH_ADVERTISE)
         } else {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
                 needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
@@ -306,6 +322,9 @@ class MainActivity : ComponentActivity() {
                 }
                 gp.start()
             }
+            startForegroundService(Intent(this, GamepadForegroundService::class.java).apply {
+                action = GamepadForegroundService.ACTION_START
+            })
         }
         ownDeviceName.value = gamepad?.ownDeviceName ?: ""
     }
@@ -319,6 +338,9 @@ class MainActivity : ComponentActivity() {
         hidAppRegistered.value = false
         hidConnectionState.value = BluetoothProfile.STATE_DISCONNECTED
         connectedDeviceName.value = ""
+        startService(Intent(this, GamepadForegroundService::class.java).apply {
+            action = GamepadForegroundService.ACTION_STOP
+        })
     }
 
     private fun reconnectLastDevice() {
