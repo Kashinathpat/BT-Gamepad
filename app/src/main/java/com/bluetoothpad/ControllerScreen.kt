@@ -22,6 +22,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -29,9 +32,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.input.pointer.pointerInput
+import android.content.Context
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -62,6 +74,7 @@ fun ControllerScreen(
     isWindowsMode: Boolean,
     connectedDeviceName: String,
     layout: ControllerLayout = ControllerLayout.default(),
+    hapticIntensity: HapticIntensity = HapticIntensity.MEDIUM,
     onStopClick: () -> Unit
 ) {
     val density = LocalDensity.current.density
@@ -101,19 +114,19 @@ fun ControllerScreen(
                         onMove = { x, y -> gamepad?.setRightStick(x, y) }
                     )
                     "DPAD" -> DpadControl(isWindowsMode = isWindowsMode, gamepad = gamepad, size = btnDp)
-                    "A"  -> GamepadBtn(label = "A",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnA,       fontSize = (btnDp.value * 0.3f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_A, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_A, false) })
-                    "B"  -> GamepadBtn(label = "B",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnB,       fontSize = (btnDp.value * 0.3f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_B, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_B, false) })
-                    "X"  -> GamepadBtn(label = "X",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnX,       fontSize = (btnDp.value * 0.3f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_X, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_X, false) })
-                    "Y"  -> GamepadBtn(label = "Y",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnY,       fontSize = (btnDp.value * 0.3f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_Y, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_Y, false) })
-                    "LB" -> GamepadBtn(label = "LB", modifier = Modifier.size(btnDp), color = BtnPrimary,  fontSize = (btnDp.value * 0.25f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LB, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LB, false) })
-                    "RB" -> GamepadBtn(label = "RB", modifier = Modifier.size(btnDp), color = BtnPrimary,  fontSize = (btnDp.value * 0.25f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RB, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RB, false) })
-                    "LT" -> GamepadBtn(label = "LT", modifier = Modifier.size(btnDp), color = BtnSecondary,fontSize = (btnDp.value * 0.25f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LT, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LT, false) })
-                    "RT" -> GamepadBtn(label = "RT", modifier = Modifier.size(btnDp), color = BtnSecondary,fontSize = (btnDp.value * 0.25f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RT, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RT, false) })
-                    "LSB"-> GamepadBtn(label = "LSB",modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnSecondary,fontSize = (btnDp.value * 0.22f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_L3, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_L3, false) })
-                    "RSB"-> GamepadBtn(label = "RSB",modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnSecondary,fontSize = (btnDp.value * 0.22f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_R3, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_R3, false) })
-                    "SELECT" -> GamepadBtn(label = "SEL", modifier = Modifier.size(btnDp), shape = RoundedCornerShape(50), color = BtnSecondary, fontSize = (btnDp.value * 0.2f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_SELECT, true) }, onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_SELECT, false) })
-                    "START"  -> GamepadBtn(label = "START",modifier = Modifier.size(btnDp), shape = RoundedCornerShape(50), color = BtnSecondary, fontSize = (btnDp.value * 0.2f).toInt(), onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_START, true) },  onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_START, false) })
-                    else -> GamepadBtn(label = btn.label, modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnPrimary, fontSize = (btnDp.value * 0.25f).toInt(), onDown = {}, onUp = {})
+                    "A"  -> GamepadBtn(label = "A",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnA,       fontSize = (btnDp.value * 0.3f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_A, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_A, false) })
+                    "B"  -> GamepadBtn(label = "B",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnB,       fontSize = (btnDp.value * 0.3f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_B, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_B, false) })
+                    "X"  -> GamepadBtn(label = "X",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnX,       fontSize = (btnDp.value * 0.3f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_X, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_X, false) })
+                    "Y"  -> GamepadBtn(label = "Y",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnY,       fontSize = (btnDp.value * 0.3f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_Y, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_Y, false) })
+                    "LB" -> GamepadBtn(label = "LB", modifier = Modifier.size(btnDp), color = BtnPrimary,  fontSize = (btnDp.value * 0.25f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LB, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LB, false) })
+                    "RB" -> GamepadBtn(label = "RB", modifier = Modifier.size(btnDp), color = BtnPrimary,  fontSize = (btnDp.value * 0.25f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RB, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RB, false) })
+                    "LT" -> GamepadBtn(label = "LT", modifier = Modifier.size(btnDp), color = BtnSecondary,fontSize = (btnDp.value * 0.25f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LT, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LT, false) })
+                    "RT" -> GamepadBtn(label = "RT", modifier = Modifier.size(btnDp), color = BtnSecondary,fontSize = (btnDp.value * 0.25f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RT, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RT, false) })
+                    "LSB"-> GamepadBtn(label = "LSB",modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnSecondary,fontSize = (btnDp.value * 0.22f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_L3, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_L3, false) })
+                    "RSB"-> GamepadBtn(label = "RSB",modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnSecondary,fontSize = (btnDp.value * 0.22f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_R3, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_R3, false) })
+                    "SELECT" -> GamepadBtn(label = "SEL",   modifier = Modifier.size(btnDp), shape = RoundedCornerShape(50), color = BtnSecondary, fontSize = (btnDp.value * 0.2f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_SELECT, true) }, onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_SELECT, false) })
+                    "START"  -> GamepadBtn(label = "START", modifier = Modifier.size(btnDp), shape = RoundedCornerShape(50), color = BtnSecondary, fontSize = (btnDp.value * 0.2f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_START, true) },  onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_START, false) })
+                    else -> GamepadBtn(label = btn.label, modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnPrimary, fontSize = (btnDp.value * 0.25f).toInt(), hapticIntensity = hapticIntensity, onDown = {}, onUp = {})
                 }
             }
         }
@@ -148,20 +161,35 @@ fun GamepadBtn(
     color: Color = BtnPrimary,
     fontSize: Int = 14,
     fontWeight: FontWeight = FontWeight.Bold,
+    hapticIntensity: HapticIntensity = HapticIntensity.MEDIUM,
     onDown: () -> Unit,
     onUp: () -> Unit
 ) {
     val pressed = remember { mutableStateOf(false) }
-    val bgColor = if (pressed.value) color.copy(alpha = 0.5f) else color
+    val bgColor = if (pressed.value) color.copy(alpha = 0.6f) else color
+    val context = LocalContext.current
+    val vibrator = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+    }
+    val scale by animateFloatAsState(
+        targetValue = if (pressed.value) 0.88f else 1f,
+        animationSpec = tween(durationMillis = if (pressed.value) 60 else 120),
+        label = "btnScale"
+    )
 
     Box(
         modifier = modifier
+            .scale(scale)
             .background(bgColor, shape)
             .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()
-                        // Only track pointers whose position is within this component's bounds
                         val myChanges = event.changes.filter { c ->
                             c.position.x >= 0f && c.position.x <= size.width &&
                             c.position.y >= 0f && c.position.y <= size.height
@@ -169,6 +197,7 @@ fun GamepadBtn(
                         val isDown = myChanges.any { it.pressed }
                         if (isDown && !pressed.value) {
                             pressed.value = true
+                            vibrateForIntensity(vibrator, hapticIntensity)
                             onDown()
                         } else if (!isDown && pressed.value) {
                             pressed.value = false
@@ -188,6 +217,33 @@ fun GamepadBtn(
                 maxLines = 1,
                 softWrap = false
             )
+        }
+    }
+}
+
+private val mainHandler = Handler(Looper.getMainLooper())
+
+private fun vibrateForIntensity(vibrator: Vibrator, intensity: HapticIntensity) {
+    if (intensity == HapticIntensity.OFF) return
+    val ms = when (intensity) {
+        HapticIntensity.LIGHT  -> 20L
+        HapticIntensity.MEDIUM -> 40L
+        HapticIntensity.STRONG -> 70L
+        HapticIntensity.OFF    -> return
+    }
+    if (!vibrator.hasVibrator()) return
+    mainHandler.post {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val amplitude = when (intensity) {
+                HapticIntensity.LIGHT  -> 60
+                HapticIntensity.MEDIUM -> 120
+                HapticIntensity.STRONG -> 255
+                HapticIntensity.OFF    -> return@post
+            }
+            vibrator.vibrate(VibrationEffect.createOneShot(ms, amplitude))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(ms)
         }
     }
 }

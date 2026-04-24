@@ -25,6 +25,11 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Phonelink
 import androidx.compose.material.icons.filled.SettingsBrightness
 import androidx.compose.material.icons.filled.SmartDisplay
+import android.content.Context
+import android.os.Build
+import android.os.Vibrator
+import android.os.VibratorManager
+import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -35,21 +40,27 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bluetoothpad.ui.theme.AppTheme
+
+enum class HapticIntensity { OFF, LIGHT, MEDIUM, STRONG }
 
 @Composable
 fun SettingsScreen(
     appTheme: AppTheme,
     appVersion: String,
     isWindowsMode: Boolean,
+    hapticIntensity: HapticIntensity,
     onThemeChange: (AppTheme) -> Unit,
     onWindowsModeToggle: (Boolean) -> Unit,
+    onHapticIntensityChange: (HapticIntensity) -> Unit,
     onBack: () -> Unit,
     contentPadding: PaddingValues = PaddingValues()
 ) {
@@ -168,6 +179,11 @@ fun SettingsScreen(
                     onCheckedChange = onWindowsModeToggle
                 )
                 Divider(cs.outlineVariant)
+                HapticIntensityRow(
+                    intensity = hapticIntensity,
+                    onChange = onHapticIntensityChange
+                )
+                Divider(cs.outlineVariant)
                 SettingsRowToggle(
                     icon = Icons.Default.Bluetooth,
                     iconBg = cs.primaryContainer,
@@ -234,6 +250,91 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun HapticIntensityRow(
+    intensity: HapticIntensity,
+    onChange: (HapticIntensity) -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    val hasVibrator = remember {
+        val v = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+        v.hasVibrator()
+    }
+
+    val options = listOf(
+        HapticIntensity.OFF    to "Off",
+        HapticIntensity.LIGHT  to "Light",
+        HapticIntensity.MEDIUM to "Medium",
+        HapticIntensity.STRONG to "Strong",
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (hasVibrator) 1f else 0.4f)
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(cs.tertiaryContainer, RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Vibration, contentDescription = null, tint = cs.onTertiaryContainer, modifier = Modifier.size(20.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Haptic feedback", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
+                Text(
+                    if (hasVibrator) "Button press vibration" else "Not supported on this device",
+                    fontSize = 12.sp,
+                    color = if (hasVibrator) cs.onSurfaceVariant else cs.error,
+                    modifier = Modifier.padding(top = 1.dp)
+                )
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            options.forEach { (value, label) ->
+                val selected = intensity == value
+                androidx.compose.material3.Surface(
+                    onClick = { if (hasVibrator) onChange(value) },
+                    enabled = hasVibrator,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp),
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (selected && hasVibrator) cs.primary else cs.surfaceContainerHigh,
+                    border = if (selected && hasVibrator) null else androidx.compose.foundation.BorderStroke(1.dp, cs.outlineVariant)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            label,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (selected && hasVibrator) cs.onPrimary else cs.onSurface
+                        )
+                    }
+                }
+            }
         }
     }
 }

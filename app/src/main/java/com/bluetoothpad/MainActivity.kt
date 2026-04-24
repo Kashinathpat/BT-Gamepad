@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
     private val ownDeviceName = mutableStateOf("")
     private val isWindowsMode = mutableStateOf(false)
     private val appTheme = mutableStateOf(AppTheme.SYSTEM)
+    private val hapticIntensity = mutableStateOf(HapticIntensity.MEDIUM)
     private val currentTab = mutableStateOf(NavTab.CONNECT)
     private val activeLayoutId = mutableStateOf(ControllerLayout.DEFAULT_ID)
     private val editingLayout = mutableStateOf<ControllerLayout?>(null)
@@ -102,6 +103,12 @@ class MainActivity : ComponentActivity() {
             "AMOLED" -> AppTheme.AMOLED
             else     -> AppTheme.SYSTEM
         }
+        hapticIntensity.value = when (prefs.getString("hapticIntensity", "MEDIUM")) {
+            "OFF"    -> HapticIntensity.OFF
+            "LIGHT"  -> HapticIntensity.LIGHT
+            "STRONG" -> HapticIntensity.STRONG
+            else     -> HapticIntensity.MEDIUM
+        }
 
         androidx.core.content.ContextCompat.registerReceiver(
             this, bondReceiver,
@@ -138,6 +145,7 @@ class MainActivity : ComponentActivity() {
                         isWindowsMode = isWindowsMode.value,
                         connectedDeviceName = connectedDeviceName.value,
                         layout = layoutRepo.load(activeLayoutId.value) ?: ControllerLayout.default(),
+                        hapticIntensity = hapticIntensity.value,
                         onStopClick = {
                             controllerVisible.value = false
                         }
@@ -224,6 +232,7 @@ class MainActivity : ComponentActivity() {
                                     appTheme = appTheme.value,
                                     appVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: "",
                                     isWindowsMode = isWindowsMode.value,
+                                    hapticIntensity = hapticIntensity.value,
                                     onThemeChange = { theme ->
                                         appTheme.value = theme
                                         prefs.edit().putString("appTheme", theme.name).apply()
@@ -232,6 +241,10 @@ class MainActivity : ComponentActivity() {
                                         isWindowsMode.value = value
                                         prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
                                         gamepad?.switchMode(value)
+                                    },
+                                    onHapticIntensityChange = { value ->
+                                        hapticIntensity.value = value
+                                        prefs.edit().putString("hapticIntensity", value.name).apply()
                                     },
                                     onBack = { currentTab.value = NavTab.CONNECT },
                                     contentPadding = innerPadding
