@@ -99,6 +99,7 @@ class MainActivity : ComponentActivity() {
         appTheme.value = when (prefs.getString("appTheme", "SYSTEM")) {
             "LIGHT"  -> AppTheme.LIGHT
             "DARK"   -> AppTheme.DARK
+            "AMOLED" -> AppTheme.AMOLED
             else     -> AppTheme.SYSTEM
         }
 
@@ -222,9 +223,15 @@ class MainActivity : ComponentActivity() {
                                 NavTab.SETTINGS -> SettingsScreen(
                                     appTheme = appTheme.value,
                                     appVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: "",
+                                    isWindowsMode = isWindowsMode.value,
                                     onThemeChange = { theme ->
                                         appTheme.value = theme
                                         prefs.edit().putString("appTheme", theme.name).apply()
+                                    },
+                                    onWindowsModeToggle = { value ->
+                                        isWindowsMode.value = value
+                                        prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
+                                        gamepad?.switchMode(value)
                                     },
                                     onBack = { currentTab.value = NavTab.CONNECT },
                                     contentPadding = innerPadding

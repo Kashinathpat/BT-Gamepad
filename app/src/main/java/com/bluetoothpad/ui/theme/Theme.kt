@@ -6,7 +6,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 
-enum class AppTheme { LIGHT, DARK, SYSTEM }
+enum class AppTheme { LIGHT, DARK, AMOLED, SYSTEM }
 
 private val LightColorScheme = lightColorScheme(
     primary                = md_light_primary,
@@ -72,18 +72,51 @@ private val DarkColorScheme = darkColorScheme(
     inversePrimary         = md_dark_inversePrimary
 )
 
+private val AmoledColorScheme = darkColorScheme(
+    primary                = md_amoled_primary,
+    onPrimary              = md_amoled_onPrimary,
+    primaryContainer       = md_amoled_primaryContainer,
+    onPrimaryContainer     = md_amoled_onPrimaryContainer,
+    secondary              = md_amoled_secondary,
+    onSecondary            = md_amoled_onSecondary,
+    secondaryContainer     = md_amoled_secondaryContainer,
+    onSecondaryContainer   = md_amoled_onSecondaryContainer,
+    tertiary               = md_amoled_tertiary,
+    onTertiary             = md_amoled_onTertiary,
+    tertiaryContainer      = md_amoled_tertiaryContainer,
+    onTertiaryContainer    = md_amoled_onTertiaryContainer,
+    error                  = md_amoled_error,
+    onError                = md_amoled_onError,
+    errorContainer         = md_amoled_errorContainer,
+    onErrorContainer       = md_amoled_onErrorContainer,
+    background             = md_amoled_background,
+    onBackground           = md_amoled_onBackground,
+    surface                = md_amoled_surface,
+    onSurface              = md_amoled_onSurface,
+    onSurfaceVariant       = md_amoled_onSurfaceVariant,
+    outline                = md_amoled_outline,
+    outlineVariant         = md_amoled_outlineVariant,
+    surfaceContainer       = md_amoled_surfaceContainer,
+    surfaceContainerHigh   = md_amoled_surfaceContainerHigh,
+    surfaceContainerLow    = md_amoled_surfaceContainerLow,
+    inverseSurface         = md_amoled_inverseSurface,
+    inverseOnSurface       = md_amoled_inverseOnSurface,
+    inversePrimary         = md_amoled_inversePrimary
+)
+
 @Composable
 fun BluetoothPadTheme(
     appTheme: AppTheme = AppTheme.SYSTEM,
     content: @Composable () -> Unit
 ) {
-    val dark = when (appTheme) {
-        AppTheme.LIGHT  -> false
-        AppTheme.DARK   -> true
-        AppTheme.SYSTEM -> isSystemInDarkTheme()
+    val colorScheme = when (appTheme) {
+        AppTheme.LIGHT  -> LightColorScheme
+        AppTheme.DARK   -> DarkColorScheme
+        AppTheme.AMOLED -> AmoledColorScheme
+        AppTheme.SYSTEM -> if (isSystemInDarkTheme()) DarkColorScheme else LightColorScheme
     }
     MaterialTheme(
-        colorScheme = if (dark) DarkColorScheme else LightColorScheme,
+        colorScheme = colorScheme,
         typography  = Typography,
         content     = content
     )
