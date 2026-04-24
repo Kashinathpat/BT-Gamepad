@@ -167,6 +167,11 @@ class MainActivity : ComponentActivity() {
                         onBack = {
                             editingLayout.value = null
                             layoutsRefreshKey.value++
+                        },
+                        onTest = { testLayout ->
+                            layoutRepo.save(testLayout)
+                            activeLayoutId.value = testLayout.id
+                            controllerVisible.value = true
                         }
                     )
                 } else {
