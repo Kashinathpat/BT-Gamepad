@@ -30,6 +30,7 @@ import android.os.Build
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -58,9 +59,13 @@ fun SettingsScreen(
     appVersion: String,
     isWindowsMode: Boolean,
     hapticIntensity: HapticIntensity,
+    motionEnabled: Boolean,
+    motionSensitivity: MotionSensitivity,
     onThemeChange: (AppTheme) -> Unit,
     onWindowsModeToggle: (Boolean) -> Unit,
     onHapticIntensityChange: (HapticIntensity) -> Unit,
+    onMotionEnabledChange: (Boolean) -> Unit,
+    onMotionSensitivityChange: (MotionSensitivity) -> Unit,
     onBack: () -> Unit,
     contentPadding: PaddingValues = PaddingValues()
 ) {
@@ -192,6 +197,35 @@ fun SettingsScreen(
                     sub = "Resume last device on launch",
                     checked = autoReconnect.value,
                     onCheckedChange = { autoReconnect.value = it }
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // MOTION section
+            SectionLabel("MOTION")
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(cs.surfaceContainerLow)
+            ) {
+                SettingsRowToggle(
+                    icon = Icons.Default.Sensors,
+                    iconBg = cs.tertiaryContainer,
+                    iconFg = cs.onTertiaryContainer,
+                    title = "Motion controls",
+                    sub = "Gyroscope maps to right stick",
+                    checked = motionEnabled,
+                    onCheckedChange = onMotionEnabledChange
+                )
+                Divider(cs.outlineVariant)
+                MotionSensitivityRow(
+                    enabled = motionEnabled,
+                    sensitivity = motionSensitivity,
+                    onChange = onMotionSensitivityChange
                 )
             }
 
@@ -463,6 +497,80 @@ private fun Divider(color: Color) {
             .height(1.dp)
             .background(color)
     )
+}
+
+@Composable
+private fun MotionSensitivityRow(
+    enabled: Boolean,
+    sensitivity: MotionSensitivity,
+    onChange: (MotionSensitivity) -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    val options = listOf(
+        MotionSensitivity.LOW    to "Low",
+        MotionSensitivity.MEDIUM to "Medium",
+        MotionSensitivity.HIGH   to "High",
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.4f)
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(cs.tertiaryContainer, RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Sensors, contentDescription = null, tint = cs.onTertiaryContainer, modifier = Modifier.size(20.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Sensitivity", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
+                Text(
+                    if (enabled) "Gyroscope input scale" else "Enable motion controls first",
+                    fontSize = 12.sp,
+                    color = cs.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 1.dp)
+                )
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            options.forEach { (value, label) ->
+                val selected = sensitivity == value
+                androidx.compose.material3.Surface(
+                    onClick = { if (enabled) onChange(value) },
+                    enabled = enabled,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp),
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (selected && enabled) cs.primary else cs.surfaceContainerHigh,
+                    border = if (selected && enabled) null else androidx.compose.foundation.BorderStroke(1.dp, cs.outlineVariant)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            label,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (selected && enabled) cs.onPrimary else cs.onSurface
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

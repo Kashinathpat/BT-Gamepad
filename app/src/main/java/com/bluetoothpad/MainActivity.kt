@@ -56,6 +56,8 @@ class MainActivity : ComponentActivity() {
     private val isWindowsMode = mutableStateOf(false)
     private val appTheme = mutableStateOf(AppTheme.SYSTEM)
     private val hapticIntensity = mutableStateOf(HapticIntensity.MEDIUM)
+    private val motionEnabled = mutableStateOf(false)
+    private val motionSensitivity = mutableStateOf(MotionSensitivity.MEDIUM)
     private val currentTab = mutableStateOf(NavTab.CONNECT)
     private val activeLayoutId = mutableStateOf(ControllerLayout.DEFAULT_ID)
     private val editingLayout = mutableStateOf<ControllerLayout?>(null)
@@ -109,6 +111,12 @@ class MainActivity : ComponentActivity() {
             "STRONG" -> HapticIntensity.STRONG
             else     -> HapticIntensity.MEDIUM
         }
+        motionEnabled.value = prefs.getBoolean("motionEnabled", false)
+        motionSensitivity.value = when (prefs.getString("motionSensitivity", "MEDIUM")) {
+            "LOW"  -> MotionSensitivity.LOW
+            "HIGH" -> MotionSensitivity.HIGH
+            else   -> MotionSensitivity.MEDIUM
+        }
 
         androidx.core.content.ContextCompat.registerReceiver(
             this, bondReceiver,
@@ -146,6 +154,8 @@ class MainActivity : ComponentActivity() {
                         connectedDeviceName = connectedDeviceName.value,
                         layout = layoutRepo.load(activeLayoutId.value) ?: ControllerLayout.default(),
                         hapticIntensity = hapticIntensity.value,
+                        motionEnabled = motionEnabled.value,
+                        motionSensitivity = motionSensitivity.value,
                         onStopClick = {
                             controllerVisible.value = false
                         }
@@ -233,6 +243,8 @@ class MainActivity : ComponentActivity() {
                                     appVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: "",
                                     isWindowsMode = isWindowsMode.value,
                                     hapticIntensity = hapticIntensity.value,
+                                    motionEnabled = motionEnabled.value,
+                                    motionSensitivity = motionSensitivity.value,
                                     onThemeChange = { theme ->
                                         appTheme.value = theme
                                         prefs.edit().putString("appTheme", theme.name).apply()
@@ -245,6 +257,14 @@ class MainActivity : ComponentActivity() {
                                     onHapticIntensityChange = { value ->
                                         hapticIntensity.value = value
                                         prefs.edit().putString("hapticIntensity", value.name).apply()
+                                    },
+                                    onMotionEnabledChange = { value ->
+                                        motionEnabled.value = value
+                                        prefs.edit().putBoolean("motionEnabled", value).apply()
+                                    },
+                                    onMotionSensitivityChange = { value ->
+                                        motionSensitivity.value = value
+                                        prefs.edit().putString("motionSensitivity", value.name).apply()
                                     },
                                     onBack = { currentTab.value = NavTab.CONNECT },
                                     contentPadding = innerPadding

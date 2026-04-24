@@ -24,7 +24,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -75,9 +77,36 @@ fun ControllerScreen(
     connectedDeviceName: String,
     layout: ControllerLayout = ControllerLayout.default(),
     hapticIntensity: HapticIntensity = HapticIntensity.MEDIUM,
+    motionEnabled: Boolean = false,
+    motionSensitivity: MotionSensitivity = MotionSensitivity.MEDIUM,
     onStopClick: () -> Unit
 ) {
     val density = LocalDensity.current.density
+
+    // Gyro output for right stick — updated by MotionSensorManager callback
+    val gyroX = remember { mutableFloatStateOf(0f) }
+    val gyroY = remember { mutableFloatStateOf(0f) }
+    val context = LocalContext.current
+    val motionManager = remember { MotionSensorManager(context) }
+
+    androidx.compose.runtime.DisposableEffect(motionEnabled, motionSensitivity) {
+        if (motionEnabled && motionManager.isSupported) {
+            val scale = MotionSensorManager.sensitivityScale(motionSensitivity)
+            motionManager.onMotion = { x, y ->
+                gyroX.floatValue = (x * scale).coerceIn(-1f, 1f)
+                gyroY.floatValue = (y * scale).coerceIn(-1f, 1f)
+            }
+            motionManager.start(motionSensitivity)
+        }
+        onDispose { motionManager.stop() }
+    }
+
+    // Continuously push gyro-only values to the right stick when motion is active
+    if (motionEnabled) {
+        LaunchedEffect(gyroX.floatValue, gyroY.floatValue) {
+            gamepad?.setRightStick(gyroX.floatValue, gyroY.floatValue)
+        }
+    }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -111,7 +140,11 @@ fun ControllerScreen(
                     "RSTICK" -> AnalogStick(
                         size = btnDp,
                         label = "R",
-                        onMove = { x, y -> gamepad?.setRightStick(x, y) }
+                        onMove = { x, y ->
+                            val cx = (x + gyroX.floatValue).coerceIn(-1f, 1f)
+                            val cy = (y + gyroY.floatValue).coerceIn(-1f, 1f)
+                            gamepad?.setRightStick(cx, cy)
+                        }
                     )
                     "DPAD" -> DpadControl(isWindowsMode = isWindowsMode, gamepad = gamepad, size = btnDp)
                     "A"  -> GamepadBtn(label = "A",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnA,       fontSize = (btnDp.value * 0.3f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_A, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_A, false) })
