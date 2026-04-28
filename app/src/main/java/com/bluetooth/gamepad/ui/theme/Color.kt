@@ -1,4 +1,4 @@
-package com.bluetoothpad.ui.theme
+package com.bluetooth.gamepad.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

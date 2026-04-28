@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "BluetoothPad"
+rootProject.name = "BtGamepad"
 include ':app'

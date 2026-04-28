@@ -1,4 +1,4 @@
-package com.bluetoothpad
+package com.bluetooth.gamepad
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
@@ -38,8 +38,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.bluetoothpad.ui.theme.AppTheme
-import com.bluetoothpad.ui.theme.BluetoothPadTheme
+import com.bluetooth.gamepad.ui.theme.AppTheme
+import com.bluetooth.gamepad.ui.theme.BtGamepadTheme
 import java.lang.reflect.Method
 
 enum class NavTab { CONNECT, LAYOUTS, SETTINGS }
@@ -126,7 +126,7 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            BluetoothPadTheme(appTheme = appTheme.value) {
+            BtGamepadTheme(appTheme = appTheme.value) {
                 val isFullScreen = controllerVisible.value || editingLayout.value != null
                 SideEffect {
                     requestedOrientation = if (isFullScreen)

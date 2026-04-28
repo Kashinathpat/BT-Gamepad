@@ -1,4 +1,4 @@
-package com.bluetoothpad
+package com.bluetooth.gamepad
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -52,21 +52,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bluetoothpad.ui.theme.BtnA
-import com.bluetoothpad.ui.theme.BtnB
-import com.bluetoothpad.ui.theme.BtnPrimary
-import com.bluetoothpad.ui.theme.ControllerOnBtn
-import com.bluetoothpad.ui.theme.OverlayPillLight
-import com.bluetoothpad.ui.theme.StickLabel
-import com.bluetoothpad.ui.theme.BtnSecondary
-import com.bluetoothpad.ui.theme.BtnX
-import com.bluetoothpad.ui.theme.BtnY
-import com.bluetoothpad.ui.theme.ControllerBg
-import com.bluetoothpad.ui.theme.DpadNormal
-import com.bluetoothpad.ui.theme.DpadPressed
-import com.bluetoothpad.ui.theme.StatusConnected
-import com.bluetoothpad.ui.theme.StickBase
-import com.bluetoothpad.ui.theme.StickKnob
+import com.bluetooth.gamepad.ui.theme.BtnA
+import com.bluetooth.gamepad.ui.theme.BtnB
+import com.bluetooth.gamepad.ui.theme.BtnPrimary
+import com.bluetooth.gamepad.ui.theme.ControllerOnBtn
+import com.bluetooth.gamepad.ui.theme.OverlayPillLight
+import com.bluetooth.gamepad.ui.theme.StickLabel
+import com.bluetooth.gamepad.ui.theme.BtnSecondary
+import com.bluetooth.gamepad.ui.theme.BtnX
+import com.bluetooth.gamepad.ui.theme.BtnY
+import com.bluetooth.gamepad.ui.theme.ControllerBg
+import com.bluetooth.gamepad.ui.theme.DpadNormal
+import com.bluetooth.gamepad.ui.theme.DpadPressed
+import com.bluetooth.gamepad.ui.theme.StatusConnected
+import com.bluetooth.gamepad.ui.theme.StickBase
+import com.bluetooth.gamepad.ui.theme.StickKnob
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 

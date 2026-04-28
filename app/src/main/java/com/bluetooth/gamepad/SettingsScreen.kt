@@ -1,4 +1,4 @@
-package com.bluetoothpad
+package com.bluetooth.gamepad
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -49,7 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bluetoothpad.ui.theme.AppTheme
+import com.bluetooth.gamepad.ui.theme.AppTheme
 
 enum class HapticIntensity { OFF, LIGHT, MEDIUM, STRONG }
 

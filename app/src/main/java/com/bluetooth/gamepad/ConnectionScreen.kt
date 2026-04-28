@@ -1,4 +1,4 @@
-package com.bluetoothpad
+package com.bluetooth.gamepad
 
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -63,9 +63,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bluetoothpad.ui.theme.StatusConnected
-import com.bluetoothpad.ui.theme.StatusConnecting
-import com.bluetoothpad.ui.theme.StatusError
+import com.bluetooth.gamepad.ui.theme.StatusConnected
+import com.bluetooth.gamepad.ui.theme.StatusConnecting
+import com.bluetooth.gamepad.ui.theme.StatusError
 
 @Composable
 fun ConnectionScreen(

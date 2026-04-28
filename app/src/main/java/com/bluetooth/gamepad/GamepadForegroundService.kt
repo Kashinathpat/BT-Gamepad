@@ -1,4 +1,4 @@
-package com.bluetoothpad
+package com.bluetooth.gamepad
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -13,8 +13,8 @@ import androidx.core.app.NotificationCompat
 class GamepadForegroundService : Service() {
 
     companion object {
-        const val ACTION_START = "com.bluetoothpad.START"
-        const val ACTION_STOP  = "com.bluetoothpad.STOP"
+        const val ACTION_START = "com.bluetooth.gamepad.START"
+        const val ACTION_STOP  = "com.bluetooth.gamepad.STOP"
         private const val CHANNEL_ID  = "gamepad_channel"
         private const val NOTIFICATION_ID = 1
     }

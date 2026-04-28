@@ -1,4 +1,4 @@
-package com.bluetoothpad
+package com.bluetooth.gamepad
 
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
