@@ -81,6 +81,7 @@ fun ConnectionScreen(
     onPairDevice: (BluetoothDevice) -> Unit,
     onUnpairDevice: (BluetoothDevice) -> Unit,
     connectedDeviceAddress: String = "",
+    activeDInputMode: Boolean = false,
     onConnectDevice: (BluetoothDevice) -> Unit,
     onCancelConnect: (BluetoothDevice) -> Unit,
     onDisconnectDevice: (BluetoothDevice) -> Unit,
@@ -257,7 +258,7 @@ fun ConnectionScreen(
                                         .padding(horizontal = 10.dp, vertical = 4.dp)
                                 ) {
                                     Text(
-                                        "HID · Active",
+                                        if (activeDInputMode) "DInput · Active" else "HID · Active",
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.ExtraBold,
                                         letterSpacing = 0.8.sp,

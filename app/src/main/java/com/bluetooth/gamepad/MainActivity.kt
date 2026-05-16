@@ -219,6 +219,7 @@ class MainActivity : ComponentActivity() {
                                     onPairDevice = { device -> pairDevice(device) },
                                     onUnpairDevice = { device -> unpairDevice(device) },
                                     connectedDeviceAddress = gamepad?.connectedDevice?.address ?: "",
+                                    activeDInputMode = gamepad?.isWindowsDInputMode ?: false,
                                     onConnectDevice = { device -> gamepad?.connectDevice(device) },
                                     onCancelConnect = { device ->
                                         userCancelledConnect = true

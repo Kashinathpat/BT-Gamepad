@@ -47,6 +47,7 @@ class BluetoothHidGamepad(private val context: Context) {
         )
 
         // HID descriptor: 12 buttons + hat switch (4 bits) + 4 axes (-127..127)
+        // Report layout (6 bytes): [btn0-7][btn8-11(lo4)+hat(hi4)][lx][ly][rx][ry]
         private val DESCRIPTOR_HID = byteArrayOf(
             0x05, 0x01,                     // Usage Page (Generic Desktop)
             0x09, 0x05,                     // Usage (Game Pad)
@@ -56,10 +57,10 @@ class BluetoothHidGamepad(private val context: Context) {
             0x09, 0x02,                     //   Usage (Button 2) B
             0x09, 0x04,                     //   Usage (Button 4) X
             0x09, 0x05,                     //   Usage (Button 5) Y
-            0x09, 0x09,                     //   Usage (Button 9) LB
-            0x09, 0x0A,                     //   Usage (Button 10) RB
-            0x09, 0x07,                     //   Usage (Button 7) LT
-            0x09, 0x08,                     //   Usage (Button 8) RT
+            0x09, 0x09,                     //   Usage (Button 9) LB  -> bit4, browser maps by usage# so LT(7)<LB(9)
+            0x09, 0x0A,                     //   Usage (Button 10) RB -> bit5
+            0x09, 0x07,                     //   Usage (Button 7) LT  -> bit6
+            0x09, 0x08,                     //   Usage (Button 8) RT  -> bit7
             0x09, 0x0B,                     //   Usage (Button 11) Select
             0x09, 0x0C,                     //   Usage (Button 12) Start
             0x09, 0x0E,                     //   Usage (Button 14) L3
@@ -110,16 +111,16 @@ class BluetoothHidGamepad(private val context: Context) {
         const val BUTTON_DPAD_LEFT = 14
         const val BUTTON_DPAD_RIGHT = 15
 
-        // Hat switch values (HID mode)
-        const val HAT_UP = 1
-        const val HAT_UP_RIGHT = 2
-        const val HAT_RIGHT = 3
-        const val HAT_DOWN_RIGHT = 4
-        const val HAT_DOWN = 5
+        // Hat switch values for HID mode (1=N,2=NE..8=NW, 9=neutral — matches Logical Max 8, value 9 = no-direction)
+        const val HAT_UP        = 1
+        const val HAT_UP_RIGHT  = 2
+        const val HAT_RIGHT     = 3
+        const val HAT_DOWN_RIGHT= 4
+        const val HAT_DOWN      = 5
         const val HAT_DOWN_LEFT = 6
-        const val HAT_LEFT = 7
-        const val HAT_UP_LEFT = 8
-        const val HAT_NEUTRAL = 9
+        const val HAT_LEFT      = 7
+        const val HAT_UP_LEFT   = 8
+        const val HAT_NEUTRAL   = 9
     }
 
     private var bluetoothAdapter: BluetoothAdapter? = null
@@ -183,11 +184,8 @@ class BluetoothHidGamepad(private val context: Context) {
                 } catch (_: SecurityException) {
                     device?.address ?: "Unknown"
                 }
-                // Full neutral report on connect — zero all bytes then set hat neutral
                 report.fill(0)
-                if (!isWindowsDInputMode) {
-                    report[1] = ((HAT_NEUTRAL and 0x0F) shl 4).toByte()
-                }
+                if (!isWindowsDInputMode) report[1] = ((HAT_NEUTRAL and 0x0F) shl 4).toByte()
                 sendReport()
             } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
                 connectedDevice = null
@@ -301,7 +299,7 @@ class BluetoothHidGamepad(private val context: Context) {
 
     fun setButtonState(index: Int, pressed: Boolean) {
         require(index in 0..15) { "Button index out of range: $index" }
-        // Indices 12-15 are DInput-only dpad buttons; in HID mode they would corrupt hat bits in report[1]
+        // Bits 12-15 are DPAD — only valid in DInput mode; HID mode uses hat switch
         if (index > 11 && !isWindowsDInputMode) return
         val byteIndex = index / 8
         val bitMask = 1 shl (index % 8)
@@ -314,7 +312,8 @@ class BluetoothHidGamepad(private val context: Context) {
     }
 
     fun setHat(hatValue: Int) {
-        // hat is stored in upper 4 bits of report[1]
+        if (isWindowsDInputMode) return
+        // hat in upper 4 bits of report[1]; lower 4 bits are buttons 8-11
         report[1] = ((report[1].toInt() and 0x0F) or ((hatValue and 0x0F) shl 4)).toByte()
         sendReport()
     }

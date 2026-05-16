@@ -151,10 +151,10 @@ fun ControllerScreen(
                     "B"  -> GamepadBtn(label = "B",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnB,       fontSize = (btnDp.value * 0.3f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_B, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_B, false) })
                     "X"  -> GamepadBtn(label = "X",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnX,       fontSize = (btnDp.value * 0.3f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_X, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_X, false) })
                     "Y"  -> GamepadBtn(label = "Y",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnY,       fontSize = (btnDp.value * 0.3f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_Y, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_Y, false) })
-                    "LB" -> GamepadBtn(label = "LB", modifier = Modifier.size(btnDp), color = BtnPrimary,  fontSize = (btnDp.value * 0.25f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LB, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LB, false) })
-                    "RB" -> GamepadBtn(label = "RB", modifier = Modifier.size(btnDp), color = BtnPrimary,  fontSize = (btnDp.value * 0.25f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RB, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RB, false) })
-                    "LT" -> GamepadBtn(label = "LT", modifier = Modifier.size(btnDp), color = BtnSecondary,fontSize = (btnDp.value * 0.25f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LT, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_LT, false) })
-                    "RT" -> GamepadBtn(label = "RT", modifier = Modifier.size(btnDp), color = BtnSecondary,fontSize = (btnDp.value * 0.25f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RT, true) },     onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_RT, false) })
+                    "LB" -> GamepadBtn(label = "LB", modifier = Modifier.size(btnDp), color = BtnPrimary,  fontSize = (btnDp.value * 0.25f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(if (isWindowsMode) BluetoothHidGamepad.BUTTON_LB else BluetoothHidGamepad.BUTTON_LT, true) },  onUp = { gamepad?.setButtonState(if (isWindowsMode) BluetoothHidGamepad.BUTTON_LB else BluetoothHidGamepad.BUTTON_LT, false) })
+                    "RB" -> GamepadBtn(label = "RB", modifier = Modifier.size(btnDp), color = BtnPrimary,  fontSize = (btnDp.value * 0.25f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(if (isWindowsMode) BluetoothHidGamepad.BUTTON_RB else BluetoothHidGamepad.BUTTON_RT, true) },  onUp = { gamepad?.setButtonState(if (isWindowsMode) BluetoothHidGamepad.BUTTON_RB else BluetoothHidGamepad.BUTTON_RT, false) })
+                    "LT" -> GamepadBtn(label = "LT", modifier = Modifier.size(btnDp), color = BtnSecondary,fontSize = (btnDp.value * 0.25f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(if (isWindowsMode) BluetoothHidGamepad.BUTTON_LT else BluetoothHidGamepad.BUTTON_LB, true) },  onUp = { gamepad?.setButtonState(if (isWindowsMode) BluetoothHidGamepad.BUTTON_LT else BluetoothHidGamepad.BUTTON_LB, false) })
+                    "RT" -> GamepadBtn(label = "RT", modifier = Modifier.size(btnDp), color = BtnSecondary,fontSize = (btnDp.value * 0.25f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(if (isWindowsMode) BluetoothHidGamepad.BUTTON_RT else BluetoothHidGamepad.BUTTON_RB, true) },  onUp = { gamepad?.setButtonState(if (isWindowsMode) BluetoothHidGamepad.BUTTON_RT else BluetoothHidGamepad.BUTTON_RB, false) })
                     "LSB"-> GamepadBtn(label = "LSB",modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnSecondary,fontSize = (btnDp.value * 0.22f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_L3, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_L3, false) })
                     "RSB"-> GamepadBtn(label = "RSB",modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnSecondary,fontSize = (btnDp.value * 0.22f).toInt(), hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_R3, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_R3, false) })
                     "SELECT" -> GamepadBtn(label = "SEL",   modifier = Modifier.size(btnDp), shape = RoundedCornerShape(50), color = BtnSecondary, fontSize = (btnDp.value * 0.2f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_SELECT, true) }, onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_SELECT, false) })
@@ -363,15 +363,15 @@ fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?, size: and
             gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_RIGHT, h == DpadDir.RIGHT)
         } else {
             val hat = when {
-                v == DpadDir.UP    && h == null             -> BluetoothHidGamepad.HAT_UP
-                v == DpadDir.UP    && h == DpadDir.RIGHT    -> BluetoothHidGamepad.HAT_UP_RIGHT
-                v == null          && h == DpadDir.RIGHT    -> BluetoothHidGamepad.HAT_RIGHT
-                v == DpadDir.DOWN  && h == DpadDir.RIGHT    -> BluetoothHidGamepad.HAT_DOWN_RIGHT
-                v == DpadDir.DOWN  && h == null             -> BluetoothHidGamepad.HAT_DOWN
-                v == DpadDir.DOWN  && h == DpadDir.LEFT     -> BluetoothHidGamepad.HAT_DOWN_LEFT
-                v == null          && h == DpadDir.LEFT     -> BluetoothHidGamepad.HAT_LEFT
-                v == DpadDir.UP    && h == DpadDir.LEFT     -> BluetoothHidGamepad.HAT_UP_LEFT
-                else                                        -> BluetoothHidGamepad.HAT_NEUTRAL
+                v == DpadDir.UP   && h == null          -> BluetoothHidGamepad.HAT_UP
+                v == DpadDir.UP   && h == DpadDir.RIGHT -> BluetoothHidGamepad.HAT_UP_RIGHT
+                v == null         && h == DpadDir.RIGHT -> BluetoothHidGamepad.HAT_RIGHT
+                v == DpadDir.DOWN && h == DpadDir.RIGHT -> BluetoothHidGamepad.HAT_DOWN_RIGHT
+                v == DpadDir.DOWN && h == null          -> BluetoothHidGamepad.HAT_DOWN
+                v == DpadDir.DOWN && h == DpadDir.LEFT  -> BluetoothHidGamepad.HAT_DOWN_LEFT
+                v == null         && h == DpadDir.LEFT  -> BluetoothHidGamepad.HAT_LEFT
+                v == DpadDir.UP   && h == DpadDir.LEFT  -> BluetoothHidGamepad.HAT_UP_LEFT
+                else                                    -> BluetoothHidGamepad.HAT_NEUTRAL
             }
             gamepad?.setHat(hat)
         }
