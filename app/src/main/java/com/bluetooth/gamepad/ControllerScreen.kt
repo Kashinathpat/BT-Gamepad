@@ -3,14 +3,10 @@ package com.bluetooth.gamepad
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -89,22 +85,36 @@ fun ControllerScreen(
     val context = LocalContext.current
     val motionManager = remember { MotionSensorManager(context) }
 
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+
     androidx.compose.runtime.DisposableEffect(motionEnabled, motionSensitivity) {
         if (motionEnabled && motionManager.isSupported) {
             val scale = MotionSensorManager.sensitivityScale(motionSensitivity)
             motionManager.onMotion = { x, y ->
-                gyroX.floatValue = (x * scale).coerceIn(-1f, 1f)
-                gyroY.floatValue = (y * scale).coerceIn(-1f, 1f)
+                // Sensor fires on background thread — marshal to main thread before touching Compose state
+                mainHandler.post {
+                    gyroX.floatValue = (x * scale).coerceIn(-1f, 1f)
+                    gyroY.floatValue = (y * scale).coerceIn(-1f, 1f)
+                }
             }
             motionManager.start(motionSensitivity)
         }
-        onDispose { motionManager.stop() }
+        onDispose {
+            motionManager.stop()
+            // Clear any lingering motion offset so the right stick returns to touch-only control
+            // when motion is disabled or sensitivity changes (the LaunchedEffect below stops
+            // firing once gyro values are no longer updated).
+            gyroX.floatValue = 0f
+            gyroY.floatValue = 0f
+            gamepad?.setRightStickMotion(0f, 0f)
+        }
     }
 
-    // Continuously push gyro-only values to the right stick when motion is active
-    if (motionEnabled) {
-        LaunchedEffect(gyroX.floatValue, gyroY.floatValue) {
-            gamepad?.setRightStick(gyroX.floatValue, gyroY.floatValue)
+    // Gyro is the sole writer of the right stick's motion component. Touch updates the touch
+    // component separately (see RSTICK below); the gamepad composes the two into one axis.
+    LaunchedEffect(gyroX.floatValue, gyroY.floatValue) {
+        if (motionEnabled) {
+            gamepad?.setRightStickMotion(gyroX.floatValue, gyroY.floatValue)
         }
     }
 
@@ -131,7 +141,7 @@ fun ControllerScreen(
                     .size(btnDp),
                 contentAlignment = Alignment.Center
             ) {
-                when (btn.id) {
+                when (btn.baseId) {
                     "LSTICK" -> AnalogStick(
                         size = btnDp,
                         label = "L",
@@ -140,13 +150,9 @@ fun ControllerScreen(
                     "RSTICK" -> AnalogStick(
                         size = btnDp,
                         label = "R",
-                        onMove = { x, y ->
-                            val cx = (x + gyroX.floatValue).coerceIn(-1f, 1f)
-                            val cy = (y + gyroY.floatValue).coerceIn(-1f, 1f)
-                            gamepad?.setRightStick(cx, cy)
-                        }
+                        onMove = { x, y -> gamepad?.setRightStickTouch(x, y) }
                     )
-                    "DPAD" -> DpadControl(isWindowsMode = isWindowsMode, gamepad = gamepad, size = btnDp)
+                    "DPAD" -> DpadControl(isWindowsMode = isWindowsMode, gamepad = gamepad, hapticIntensity = hapticIntensity, size = btnDp)
                     "A"  -> GamepadBtn(label = "A",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnA,       fontSize = (btnDp.value * 0.3f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_A, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_A, false) })
                     "B"  -> GamepadBtn(label = "B",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnB,       fontSize = (btnDp.value * 0.3f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_B, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_B, false) })
                     "X"  -> GamepadBtn(label = "X",  modifier = Modifier.size(btnDp), shape = CircleShape, color = BtnX,       fontSize = (btnDp.value * 0.3f).toInt(),  hapticIntensity = hapticIntensity, onDown = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_X, true) },      onUp = { gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_X, false) })
@@ -203,7 +209,8 @@ fun GamepadBtn(
     val context = LocalContext.current
     val vibrator = remember {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+                ?: @Suppress("DEPRECATION") (context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator)
         } else {
             @Suppress("DEPRECATION")
             context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
@@ -350,17 +357,29 @@ fun AnalogStick(
 }
 
 @Composable
-fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?, size: androidx.compose.ui.unit.Dp = 124.dp) {
+fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?, hapticIntensity: HapticIntensity, size: androidx.compose.ui.unit.Dp = 124.dp) {
     // Track H and V axes independently so diagonals work
     val activeH = remember { mutableStateOf<DpadDir?>(null) } // LEFT or RIGHT
     val activeV = remember { mutableStateOf<DpadDir?>(null) } // UP or DOWN
+    val context = LocalContext.current
+    val vibrator = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+                ?: @Suppress("DEPRECATION") (context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator)
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+    }
 
     fun sendState(h: DpadDir?, v: DpadDir?) {
         if (isWindowsMode) {
-            gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_UP,    v == DpadDir.UP)
-            gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_DOWN,  v == DpadDir.DOWN)
-            gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_LEFT,  h == DpadDir.LEFT)
-            gamepad?.setButtonState(BluetoothHidGamepad.BUTTON_DPAD_RIGHT, h == DpadDir.RIGHT)
+            gamepad?.setDpadState(
+                up = v == DpadDir.UP,
+                down = v == DpadDir.DOWN,
+                left = h == DpadDir.LEFT,
+                right = h == DpadDir.RIGHT
+            )
         } else {
             val hat = when {
                 v == DpadDir.UP   && h == null          -> BluetoothHidGamepad.HAT_UP
@@ -384,6 +403,10 @@ fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?, size: and
         val newH = when { dx > dead -> DpadDir.RIGHT; dx < -dead -> DpadDir.LEFT; else -> null }
         val newV = when { dy < -dead -> DpadDir.UP;   dy > dead  -> DpadDir.DOWN; else -> null }
         if (newH != activeH.value || newV != activeV.value) {
+            val isNewPress = (newH != null && newH != activeH.value) || (newV != null && newV != activeV.value)
+            if (isNewPress) {
+                vibrateForIntensity(vibrator, hapticIntensity)
+            }
             activeH.value = newH
             activeV.value = newV
             sendState(newH, newV)
@@ -461,39 +484,3 @@ fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?, size: and
 }
 
 enum class DpadDir { UP, DOWN, LEFT, RIGHT }
-
-@Composable
-fun AbxyButtons(onButton: (Int, Boolean) -> Unit) {
-    val btnSize = 52.dp
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        GamepadBtn(
-            label = "Y", modifier = Modifier.size(btnSize), shape = CircleShape,
-            color = BtnY, fontSize = 17,
-            onDown = { onButton(BluetoothHidGamepad.BUTTON_Y, true) },
-            onUp = { onButton(BluetoothHidGamepad.BUTTON_Y, false) }
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            GamepadBtn(
-                label = "X", modifier = Modifier.size(btnSize), shape = CircleShape,
-                color = BtnX, fontSize = 17,
-                onDown = { onButton(BluetoothHidGamepad.BUTTON_X, true) },
-                onUp = { onButton(BluetoothHidGamepad.BUTTON_X, false) }
-            )
-            Spacer(modifier = Modifier.size(btnSize - 10.dp))
-            GamepadBtn(
-                label = "B", modifier = Modifier.size(btnSize), shape = CircleShape,
-                color = BtnB, fontSize = 17,
-                onDown = { onButton(BluetoothHidGamepad.BUTTON_B, true) },
-                onUp = { onButton(BluetoothHidGamepad.BUTTON_B, false) }
-            )
-        }
-        Spacer(modifier = Modifier.height(2.dp))
-        GamepadBtn(
-            label = "A", modifier = Modifier.size(btnSize), shape = CircleShape,
-            color = BtnA, fontSize = 17,
-            onDown = { onButton(BluetoothHidGamepad.BUTTON_A, true) },
-            onUp = { onButton(BluetoothHidGamepad.BUTTON_A, false) }
-        )
-    }
-}

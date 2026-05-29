@@ -15,7 +15,11 @@ import android.util.Log
 import android.widget.Toast
 import java.util.concurrent.Executors
 
-class BluetoothHidGamepad(private val context: Context) {
+class BluetoothHidGamepad(context: Context) {
+
+    // Use the application context: this object outlives the Activity (callbacks fire on system
+    // threads, the profile proxy and receiver are long-lived), so holding an Activity would leak it.
+    private val context: Context = context.applicationContext
 
     companion object {
         private const val TAG = "BtHidGamepad"
@@ -79,7 +83,7 @@ class BluetoothHidGamepad(private val context: Context) {
             0x65, 0x14,                     //   Unit (Eng Rot: Degree)
             0x75, 0x04,                     //   Report Size (4)
             0x95.toByte(), 0x01,            //   Report Count (1)
-            0x81.toByte(), 0x02,            //   Input (Data,Var,Abs)
+            0x81.toByte(), 0x42,            //   Input (Data,Var,Abs,No Null/Null State)
             0x05, 0x01,                     //   Usage Page (Generic Desktop)
             0x15, 0x81.toByte(),            //   Logical Minimum (-127)
             0x25, 0x7F,                     //   Logical Maximum (127)
@@ -137,30 +141,55 @@ class BluetoothHidGamepad(private val context: Context) {
                 connectionState = BluetoothProfile.STATE_DISCONNECTED
                 Log.d(TAG, "BT turned off — state reset")
                 onStatusChanged?.invoke()
+            } else if (state == BluetoothAdapter.STATE_ON && hidDevice == null) {
+                // Bluetooth re-enabled after launch — re-bind the profile so the gamepad works
+                // without restarting the app. onServiceConnected re-registers the HID app.
+                Log.d(TAG, "BT turned on — re-acquiring HID profile proxy")
+                acquireProfileProxy()
             }
         }
     }
+    @Volatile
     var connectedDevice: BluetoothDevice? = null
         private set
 
+    @Volatile
     var isConnected = false
         private set
+    @Volatile
     var isAppRegistered = false
         private set
+    @Volatile
     var connectionState = BluetoothProfile.STATE_DISCONNECTED
         private set
+    @Volatile
     var ownDeviceName: String = ""
         private set
+    @Volatile
     var connectedDeviceName: String = ""
         private set
+    @Volatile
     var isWindowsDInputMode: Boolean = false
 
     // 6-byte report: [buttons_lo, buttons_hi_with_hat, lx, ly, rx, ry]
     private val report = ByteArray(6)
+    private val reportLock = Any()
+
+    // Coalesces sends: at most one transmit task is in flight at a time. Rapid input (e.g. gyro at
+    // SENSOR_DELAY_FASTEST plus stick drags) marks the report dirty instead of queuing a task each,
+    // so the executor never backs up and always transmits the latest state.
+    private val sendPending = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    private var hidExecutor = Executors.newSingleThreadExecutor()
 
     var onStatusChanged: (() -> Unit)? = null
 
+    @Volatile
     private var pendingReRegister = false
+
+    // Device queued while HID profile/app is still initialising — connected automatically once ready
+    @Volatile
+    private var pendingConnectDevice: BluetoothDevice? = null
 
     private val hidCallback = object : BluetoothHidDevice.Callback() {
         override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
@@ -171,6 +200,16 @@ class BluetoothHidGamepad(private val context: Context) {
                 registerApp()
             } else {
                 onStatusChanged?.invoke()
+                if (registered) {
+                    pendingConnectDevice?.let { device ->
+                        pendingConnectDevice = null
+                        try {
+                            hidDevice?.connect(device)
+                        } catch (e: SecurityException) {
+                            Log.e(TAG, "SecurityException connecting pending device", e)
+                        }
+                    }
+                }
             }
         }
 
@@ -184,8 +223,10 @@ class BluetoothHidGamepad(private val context: Context) {
                 } catch (_: SecurityException) {
                     device?.address ?: "Unknown"
                 }
-                report.fill(0)
-                if (!isWindowsDInputMode) report[1] = ((HAT_NEUTRAL and 0x0F) shl 4).toByte()
+                synchronized(reportLock) {
+                    resetReport()
+                    if (!isWindowsDInputMode) report[1] = ((HAT_NEUTRAL and 0x0F) shl 4).toByte()
+                }
                 sendReport()
             } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
                 connectedDevice = null
@@ -220,6 +261,7 @@ class BluetoothHidGamepad(private val context: Context) {
     }
 
     fun start(): Boolean {
+        if (hidExecutor.isShutdown) hidExecutor = Executors.newSingleThreadExecutor()
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         bluetoothAdapter = manager?.adapter ?: return false
         ownDeviceName = try {
@@ -227,11 +269,24 @@ class BluetoothHidGamepad(private val context: Context) {
         } catch (_: SecurityException) {
             "Unknown"
         }
-        context.registerReceiver(btStateReceiver, IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED))
+        // BT state changes are sent by the system — must be EXPORTED
+        androidx.core.content.ContextCompat.registerReceiver(
+            context,
+            btStateReceiver,
+            IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED),
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+        )
+        return acquireProfileProxy()
+    }
+
+    // Binds the HID profile proxy. onServiceConnected then registers the app, so callers must not
+    // register separately. Safe to call again after Bluetooth is re-enabled.
+    private fun acquireProfileProxy(): Boolean {
+        val adapter = bluetoothAdapter ?: return false
         return try {
-            bluetoothAdapter!!.getProfileProxy(context, profileListener, BluetoothProfile.HID_DEVICE)
+            adapter.getProfileProxy(context, profileListener, BluetoothProfile.HID_DEVICE)
         } catch (e: SecurityException) {
-            Log.e(TAG, "SecurityException starting HID", e)
+            Log.e(TAG, "SecurityException acquiring HID profile proxy", e)
             false
         }
     }
@@ -239,7 +294,7 @@ class BluetoothHidGamepad(private val context: Context) {
     fun switchMode(windowsDInput: Boolean) {
         if (isWindowsDInputMode == windowsDInput) return
         isWindowsDInputMode = windowsDInput
-        report.fill(0)
+        synchronized(reportLock) { resetReport() }
         val hid = hidDevice ?: return
         pendingReRegister = true
         try {
@@ -266,23 +321,22 @@ class BluetoothHidGamepad(private val context: Context) {
             800, 9, 0, 10, 50
         )
         try {
-            hid.registerApp(sdp, qos, qos, Executors.newCachedThreadPool(), hidCallback)
+            hid.registerApp(sdp, qos, qos, hidExecutor, hidCallback)
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException registerApp", e)
         }
     }
 
     fun connectDevice(device: BluetoothDevice) {
-        val hid = hidDevice ?: run {
-            Toast.makeText(context, "HID profile not ready, tap Start / Reconnect", Toast.LENGTH_SHORT).show()
+        if (hidDevice == null || !isAppRegistered) {
+            // Profile or app not ready yet — queue and connect automatically once registered
+            pendingConnectDevice = device
+            Toast.makeText(context, "Initialising… will connect shortly", Toast.LENGTH_SHORT).show()
             return
         }
-        if (!isAppRegistered) {
-            Toast.makeText(context, "App not registered yet, please wait", Toast.LENGTH_SHORT).show()
-            return
-        }
+        pendingConnectDevice = null
         try {
-            hid.connect(device)
+            hidDevice?.connect(device)
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException connect", e)
         }
@@ -297,8 +351,8 @@ class BluetoothHidGamepad(private val context: Context) {
         }
     }
 
-    fun setButtonState(index: Int, pressed: Boolean) {
-        require(index in 0..15) { "Button index out of range: $index" }
+    private fun setButtonStateInternal(index: Int, pressed: Boolean) {
+        if (index !in 0..15) return
         // Bits 12-15 are DPAD — only valid in DInput mode; HID mode uses hat switch
         if (index > 11 && !isWindowsDInputMode) return
         val byteIndex = index / 8
@@ -308,26 +362,82 @@ class BluetoothHidGamepad(private val context: Context) {
         } else {
             report[byteIndex] = (report[byteIndex].toInt() and bitMask.inv()).toByte()
         }
+    }
+
+    fun setButtonState(index: Int, pressed: Boolean) {
+        synchronized(reportLock) {
+            setButtonStateInternal(index, pressed)
+        }
+        sendReport()
+    }
+
+    fun setDpadState(up: Boolean, down: Boolean, left: Boolean, right: Boolean) {
+        if (!isWindowsDInputMode) return
+        synchronized(reportLock) {
+            setButtonStateInternal(BUTTON_DPAD_UP, up)
+            setButtonStateInternal(BUTTON_DPAD_DOWN, down)
+            setButtonStateInternal(BUTTON_DPAD_LEFT, left)
+            setButtonStateInternal(BUTTON_DPAD_RIGHT, right)
+        }
         sendReport()
     }
 
     fun setHat(hatValue: Int) {
         if (isWindowsDInputMode) return
-        // hat in upper 4 bits of report[1]; lower 4 bits are buttons 8-11
-        report[1] = ((report[1].toInt() and 0x0F) or ((hatValue and 0x0F) shl 4)).toByte()
+        synchronized(reportLock) {
+            // hat in upper 4 bits of report[1]; lower 4 bits are buttons 8-11
+            report[1] = ((report[1].toInt() and 0x0F) or ((hatValue and 0x0F) shl 4)).toByte()
+        }
         sendReport()
     }
 
     fun setLeftStick(x: Float, y: Float) {
-        report[2] = floatToByte(x)
-        report[3] = floatToByte(y)
+        synchronized(reportLock) {
+            report[2] = floatToByte(x)
+            report[3] = floatToByte(y)
+        }
         sendReport()
     }
 
-    fun setRightStick(x: Float, y: Float) {
-        report[4] = floatToByte(x)
-        report[5] = floatToByte(y)
+    // Right stick has two independent input sources — on-screen touch and motion (gyro).
+    // Each source updates only its own component; the gamepad composes them into the single
+    // axis so there is exactly one writer for report[4]/report[5] and the two never race.
+    private var rightTouchX = 0f
+    private var rightTouchY = 0f
+    private var rightMotionX = 0f
+    private var rightMotionY = 0f
+
+    fun setRightStickTouch(x: Float, y: Float) {
+        synchronized(reportLock) {
+            rightTouchX = x
+            rightTouchY = y
+            applyRightStick()
+        }
         sendReport()
+    }
+
+    fun setRightStickMotion(x: Float, y: Float) {
+        synchronized(reportLock) {
+            rightMotionX = x
+            rightMotionY = y
+            applyRightStick()
+        }
+        sendReport()
+    }
+
+    // Must be called while holding reportLock.
+    private fun applyRightStick() {
+        report[4] = floatToByte(rightTouchX + rightMotionX)
+        report[5] = floatToByte(rightTouchY + rightMotionY)
+    }
+
+    // Zeroes the report and the cached stick components. Must be called while holding reportLock.
+    private fun resetReport() {
+        report.fill(0)
+        rightTouchX = 0f
+        rightTouchY = 0f
+        rightMotionX = 0f
+        rightMotionY = 0f
     }
 
     private fun floatToByte(f: Float): Byte {
@@ -336,22 +446,39 @@ class BluetoothHidGamepad(private val context: Context) {
     }
 
     private fun sendReport() {
-        val device = connectedDevice ?: return
-        val hid = hidDevice ?: return
+        // If a transmit is already scheduled, it will pick up the latest report — nothing to do.
+        if (!sendPending.compareAndSet(false, true)) return
         try {
-            hid.sendReport(device, 0, report)
-        } catch (e: SecurityException) {
-            Log.e(TAG, "SecurityException sendReport", e)
+            hidExecutor.submit {
+                sendPending.set(false)
+                val device = connectedDevice ?: return@submit
+                val hid = hidDevice ?: return@submit
+                val reportCopy = synchronized(reportLock) { report.clone() }
+                try {
+                    hid.sendReport(device, 0, reportCopy)
+                } catch (e: SecurityException) {
+                    Log.e(TAG, "SecurityException sendReport in executor", e)
+                }
+            }
+        } catch (_: Exception) {
+            // Executor rejected the task (e.g. shut down mid-stop) — clear the gate so a later
+            // send can be scheduled again.
+            sendPending.set(false)
         }
     }
 
     fun stop() {
+        onStatusChanged = null
+        pendingConnectDevice = null
         try { context.unregisterReceiver(btStateReceiver) } catch (_: Exception) {}
         try {
             hidDevice?.unregisterApp()
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException unregisterApp", e)
         }
+        try {
+            hidExecutor.shutdownNow()
+        } catch (_: Exception) {}
         hidDevice?.let {
             bluetoothAdapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, it)
         }

@@ -1,6 +1,7 @@
 package com.bluetooth.gamepad
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
@@ -19,6 +20,7 @@ import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
@@ -46,7 +48,6 @@ enum class NavTab { CONNECT, LAYOUTS, SETTINGS }
 
 class MainActivity : ComponentActivity() {
 
-    private val connected = mutableStateOf(false)
     private val controllerVisible = mutableStateOf(false)
     private val hidProfileConnected = mutableStateOf(false)
     private val hidAppRegistered = mutableStateOf(false)
@@ -61,7 +62,11 @@ class MainActivity : ComponentActivity() {
     private val currentTab = mutableStateOf(NavTab.CONNECT)
     private val activeLayoutId = mutableStateOf(ControllerLayout.DEFAULT_ID)
     private val editingLayout = mutableStateOf<ControllerLayout?>(null)
+    // Transient layout shown by the editor's "Test" action. Held in memory only — never persisted —
+    // so previewing unsaved edits does not overwrite the stored layout.
+    private val previewLayout = mutableStateOf<ControllerLayout?>(null)
     private val layoutsRefreshKey = mutableStateOf(0)
+    private val autoReconnect = mutableStateOf(true)
 
     private var gamepad: BluetoothHidGamepad? = null
     private var userCancelledConnect = false
@@ -117,7 +122,9 @@ class MainActivity : ComponentActivity() {
             "HIGH" -> MotionSensitivity.HIGH
             else   -> MotionSensitivity.MEDIUM
         }
+        autoReconnect.value = prefs.getBoolean("autoReconnect", true)
 
+        // Bond state changes are sent by the Bluetooth system — must be EXPORTED
         androidx.core.content.ContextCompat.registerReceiver(
             this, bondReceiver,
             IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED),
@@ -128,7 +135,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             BtGamepadTheme(appTheme = appTheme.value) {
                 val isFullScreen = controllerVisible.value || editingLayout.value != null
-                SideEffect {
+                androidx.compose.runtime.LaunchedEffect(isFullScreen, controllerVisible.value) {
                     requestedOrientation = if (isFullScreen)
                         ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                     else
@@ -148,19 +155,28 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (controllerVisible.value) {
+                    val closeController = {
+                        controllerVisible.value = false
+                        previewLayout.value = null
+                    }
+                    BackHandler { closeController() }
                     ControllerScreen(
                         gamepad = gamepad,
                         isWindowsMode = isWindowsMode.value,
                         connectedDeviceName = connectedDeviceName.value,
-                        layout = layoutRepo.load(activeLayoutId.value) ?: ControllerLayout.default(),
+                        layout = previewLayout.value
+                            ?: layoutRepo.load(activeLayoutId.value)
+                            ?: ControllerLayout.default(),
                         hapticIntensity = hapticIntensity.value,
                         motionEnabled = motionEnabled.value,
                         motionSensitivity = motionSensitivity.value,
-                        onStopClick = {
-                            controllerVisible.value = false
-                        }
+                        onStopClick = closeController
                     )
                 } else if (editingLayout.value != null) {
+                    BackHandler {
+                        editingLayout.value = null
+                        layoutsRefreshKey.value++
+                    }
                     LayoutEditorScreen(
                         layout = editingLayout.value!!,
                         repo = layoutRepo,
@@ -169,15 +185,14 @@ class MainActivity : ComponentActivity() {
                             layoutsRefreshKey.value++
                         },
                         onTest = { testLayout ->
-                            layoutRepo.save(testLayout)
-                            activeLayoutId.value = testLayout.id
+                            // Preview only — keep the edits in memory and do not persist them.
+                            previewLayout.value = testLayout
                             controllerVisible.value = true
                         }
                     )
                 } else {
-
                     val cs = MaterialTheme.colorScheme
-                        Scaffold(
+                    Scaffold(
                             bottomBar = {
                                 NavigationBar(containerColor = cs.surfaceContainer) {
                                     NavigationBarItem(
@@ -210,7 +225,7 @@ class MainActivity : ComponentActivity() {
                                     connectedDeviceName = connectedDeviceName.value,
                                     ownDeviceName = ownDeviceName.value,
                                     isWindowsMode = isWindowsMode.value,
-                                    onStartClick = { requestPermissionsAndInit(); reconnectLastDevice() },
+                                    onStartClick = { requestPermissionsAndInit() },
                                     onWindowsModeToggle = { value ->
                                         isWindowsMode.value = value
                                         prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
@@ -219,6 +234,7 @@ class MainActivity : ComponentActivity() {
                                     onPairDevice = { device -> pairDevice(device) },
                                     onUnpairDevice = { device -> unpairDevice(device) },
                                     connectedDeviceAddress = gamepad?.connectedDevice?.address ?: "",
+                                    connectedDevice = gamepad?.connectedDevice,
                                     activeDInputMode = gamepad?.isWindowsDInputMode ?: false,
                                     onConnectDevice = { device -> gamepad?.connectDevice(device) },
                                     onCancelConnect = { device ->
@@ -238,6 +254,7 @@ class MainActivity : ComponentActivity() {
                                         onStart = { layout ->
                                             activeLayoutId.value = layout.id
                                             prefs.edit().putString("activeLayoutId", layout.id).apply()
+                                            previewLayout.value = null
                                             controllerVisible.value = true
                                         },
                                         onEdit = { layout -> editingLayout.value = layout },
@@ -251,6 +268,7 @@ class MainActivity : ComponentActivity() {
                                     hapticIntensity = hapticIntensity.value,
                                     motionEnabled = motionEnabled.value,
                                     motionSensitivity = motionSensitivity.value,
+                                    autoReconnect = autoReconnect.value,
                                     onThemeChange = { theme ->
                                         appTheme.value = theme
                                         prefs.edit().putString("appTheme", theme.name).apply()
@@ -271,6 +289,10 @@ class MainActivity : ComponentActivity() {
                                     onMotionSensitivityChange = { value ->
                                         motionSensitivity.value = value
                                         prefs.edit().putString("motionSensitivity", value.name).apply()
+                                    },
+                                    onAutoReconnectChange = { value ->
+                                        autoReconnect.value = value
+                                        prefs.edit().putBoolean("autoReconnect", value).apply()
                                     },
                                     onBack = { currentTab.value = NavTab.CONNECT },
                                     contentPadding = innerPadding
@@ -308,6 +330,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // ACTION_REQUEST_ENABLE is associated with BLUETOOTH_CONNECT by lint. This runs only after that
+    // permission is granted (requestPermissionsAndInit gates initGamepad), and the call is wrapped
+    // to fall back to Bluetooth settings if it is ever denied — so the warning is a false positive.
+    @SuppressLint("MissingPermission")
     fun initGamepad() {
         val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         val adapter = manager?.adapter
@@ -328,7 +354,6 @@ class MainActivity : ComponentActivity() {
                         hidProfileConnected.value = gp.isAppRegistered || gp.connectionState != BluetoothProfile.STATE_DISCONNECTED
                         hidAppRegistered.value = gp.isAppRegistered
                         hidConnectionState.value = gp.connectionState
-                        connected.value = gp.isConnected
                         connectedDeviceName.value = gp.connectedDeviceName
                         ownDeviceName.value = gp.ownDeviceName
 
@@ -336,8 +361,14 @@ class MainActivity : ComponentActivity() {
                             BluetoothProfile.STATE_CONNECTED -> {
                                 prefs.edit().putString("lastDeviceAddress", gp.connectedDevice?.address).apply()
                                 Toast.makeText(this, "Connected to ${gp.connectedDeviceName}", Toast.LENGTH_SHORT).show()
+                                // Protect the live HID session from background termination. Started
+                                // per-connection (not once at init) so reconnections are covered too.
+                                startForegroundService(Intent(this, GamepadForegroundService::class.java).apply {
+                                    action = GamepadForegroundService.ACTION_START
+                                })
                             }
                             BluetoothProfile.STATE_DISCONNECTED -> {
+                                stopService(Intent(this, GamepadForegroundService::class.java))
                                 if (!userCancelledConnect) {
                                     when (prevState) {
                                         BluetoothProfile.STATE_CONNECTING ->
@@ -353,9 +384,11 @@ class MainActivity : ComponentActivity() {
                 }
                 gp.start()
             }
-            startForegroundService(Intent(this, GamepadForegroundService::class.java).apply {
-                action = GamepadForegroundService.ACTION_START
-            })
+            // The foreground service is started on connection (STATE_CONNECTED), not here, so it
+            // tracks the actual HID session and is correctly re-started on every reconnect.
+            if (prefs.getBoolean("autoReconnect", true)) {
+                reconnectLastDevice()
+            }
         }
         ownDeviceName.value = gamepad?.ownDeviceName ?: ""
     }
@@ -363,15 +396,12 @@ class MainActivity : ComponentActivity() {
     private fun stopGamepad() {
         gamepad?.stop()
         gamepad = null
-        connected.value = false
         controllerVisible.value = false
         hidProfileConnected.value = false
         hidAppRegistered.value = false
         hidConnectionState.value = BluetoothProfile.STATE_DISCONNECTED
         connectedDeviceName.value = ""
-        startService(Intent(this, GamepadForegroundService::class.java).apply {
-            action = GamepadForegroundService.ACTION_STOP
-        })
+        stopService(Intent(this, GamepadForegroundService::class.java))
     }
 
     private fun reconnectLastDevice() {
@@ -415,6 +445,7 @@ class MainActivity : ComponentActivity() {
 
     fun unpairDevice(device: BluetoothDevice) {
         try {
+            @Suppress("DiscouragedPrivateApi")
             val method: Method = device.javaClass.getMethod("removeBond")
             method.isAccessible = true
             method.invoke(device)
@@ -423,7 +454,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        gamepad?.stop()
-        unregisterReceiver(bondReceiver)
+        stopGamepad()
+        try {
+            unregisterReceiver(bondReceiver)
+        } catch (_: Exception) {}
     }
 }

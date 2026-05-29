@@ -149,7 +149,7 @@ fun LayoutsScreen(
             }
 
             // Layout list
-            items(layouts) { layout ->
+            items(layouts, key = { it.id }) { layout ->
                 val initials = layout.name.take(2).uppercase()
                 val isAlt = layout.name.startsWith("FC", ignoreCase = true)
                 val badgeBg = if (isAlt) cs.tertiaryContainer else cs.primaryContainer

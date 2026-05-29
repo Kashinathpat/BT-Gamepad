@@ -5,11 +5,14 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
+import android.view.Surface
+import android.view.WindowManager
 import kotlin.math.abs
 
 enum class MotionSensitivity { LOW, MEDIUM, HIGH }
 
-class MotionSensorManager(context: Context) {
+class MotionSensorManager(private val context: Context) {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     private val rotationSensor: Sensor? =
@@ -25,7 +28,6 @@ class MotionSensorManager(context: Context) {
     private val remappedMatrix = FloatArray(9)
     private val orientation = FloatArray(3)
 
-    // Smoothed output values (exponential moving average)
     private var smoothX = 0f
     private var smoothY = 0f
     private val SMOOTHING = 0.35f
@@ -36,20 +38,18 @@ class MotionSensorManager(context: Context) {
         override fun onSensorChanged(event: SensorEvent) {
             SensorManager.getRotationMatrixFromVector(rotMatrix, event.values)
 
-            // Remap for landscape-right orientation (controller is always landscape).
-            // AXIS_X stays as X; old Y becomes negative Z, so we use AXIS_X, AXIS_Z
-            // which correctly maps: tilt up/down → Y, tilt left/right → X.
-            SensorManager.remapCoordinateSystem(
-                rotMatrix,
-                SensorManager.AXIS_X,
-                SensorManager.AXIS_Z,
-                remappedMatrix
-            )
+            // Remap axes based on actual display rotation so landscape-left and
+            // landscape-right both produce correct tilt directions.
+            val (axisX, axisY) = when (displayRotation()) {
+                Surface.ROTATION_270 -> SensorManager.AXIS_MINUS_X to SensorManager.AXIS_MINUS_Z
+                else                 -> SensorManager.AXIS_X        to SensorManager.AXIS_Z
+            }
+
+            SensorManager.remapCoordinateSystem(rotMatrix, axisX, axisY, remappedMatrix)
             SensorManager.getOrientation(remappedMatrix, orientation)
 
-            // After remap for landscape:
-            //   orientation[1] (pitch) = tilt forward/back → stick Y
-            //   orientation[2] (roll)  = tilt left/right   → stick X
+            // orientation[1] = pitch (tilt forward/back) -> stick Y
+            // orientation[2] = roll  (tilt left/right)   -> stick X
             val rawPitch = orientation[1]
             val rawRoll  = orientation[2]
 
@@ -59,8 +59,9 @@ class MotionSensorManager(context: Context) {
                 return
             }
 
-            val dx = rawRoll  - base[0]
-            val dy = rawPitch - base[1]
+            // Wrap angle differences to [-PI, PI] to avoid gimbal discontinuity jumps.
+            val dx = Math.IEEEremainder((rawRoll  - base[0]).toDouble(), 2.0 * Math.PI).toFloat()
+            val dy = Math.IEEEremainder((rawPitch - base[1]).toDouble(), 2.0 * Math.PI).toFloat()
 
             val x = applyDeadZone(dx).coerceIn(-1f, 1f)
             val y = applyDeadZone(dy).coerceIn(-1f, 1f)
@@ -89,12 +90,7 @@ class MotionSensorManager(context: Context) {
 
     fun stop() {
         sensorManager.unregisterListener(listener)
-        baseAngles = null
-        smoothX = 0f
-        smoothY = 0f
-    }
-
-    fun recalibrate() {
+        onMotion = null
         baseAngles = null
         smoothX = 0f
         smoothY = 0f
@@ -102,6 +98,19 @@ class MotionSensorManager(context: Context) {
 
     private fun applyDeadZone(value: Float): Float {
         return if (abs(value) < DEAD_ZONE) 0f else value
+    }
+
+    // Context.getDisplay() is API 30+; fall back to the window manager's display below that.
+    private fun displayRotation(): Int = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            context.display?.rotation ?: Surface.ROTATION_90
+        } else {
+            @Suppress("DEPRECATION")
+            (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
+                ?.defaultDisplay?.rotation ?: Surface.ROTATION_90
+        }
+    } catch (_: Exception) {
+        Surface.ROTATION_90
     }
 
     companion object {

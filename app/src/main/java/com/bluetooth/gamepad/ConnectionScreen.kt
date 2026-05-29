@@ -61,6 +61,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bluetooth.gamepad.ui.theme.StatusConnected
@@ -81,6 +82,7 @@ fun ConnectionScreen(
     onPairDevice: (BluetoothDevice) -> Unit,
     onUnpairDevice: (BluetoothDevice) -> Unit,
     connectedDeviceAddress: String = "",
+    connectedDevice: BluetoothDevice? = null,
     activeDInputMode: Boolean = false,
     onConnectDevice: (BluetoothDevice) -> Unit,
     onCancelConnect: (BluetoothDevice) -> Unit,
@@ -93,6 +95,8 @@ fun ConnectionScreen(
     val showUnpairConfirm = remember { mutableStateOf<BluetoothDevice?>(null) }
     val connectingAddress = remember { mutableStateOf<String?>(null) }
     val isConnectedRef = remember { mutableStateOf(hidConnectionState == BluetoothProfile.STATE_CONNECTED) }
+
+    val isDiscovering = remember { mutableStateOf(false) }
 
     LaunchedEffect(hidConnectionState) {
         isConnectedRef.value = hidConnectionState == BluetoothProfile.STATE_CONNECTED
@@ -131,8 +135,11 @@ fun ConnectionScreen(
                         val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
                         if (device != null && state == BluetoothDevice.BOND_NONE) devices.remove(device)
                     }
+                    BluetoothAdapter.ACTION_DISCOVERY_STARTED -> {
+                        isDiscovering.value = true
+                    }
                     BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
-                        if (!isConnectedRef.value) activity.startDiscovery()
+                        isDiscovering.value = false
                     }
                 }
             }
@@ -140,8 +147,10 @@ fun ConnectionScreen(
         val filter = IntentFilter(BluetoothDevice.ACTION_FOUND).also {
             it.addAction(BluetoothDevice.ACTION_NAME_CHANGED)
             it.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+            it.addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED)
             it.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         }
+        // Bluetooth discovery broadcasts come from the system process — must be EXPORTED
         androidx.core.content.ContextCompat.registerReceiver(
             context, receiver, filter,
             androidx.core.content.ContextCompat.RECEIVER_EXPORTED
@@ -275,15 +284,22 @@ fun ConnectionScreen(
                             fontWeight = FontWeight.Bold,
                             letterSpacing = (-0.3).sp,
                             color = heroTextColor,
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
 
                         Spacer(Modifier.height(16.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
-                                onClick = onStartClick,
+                                onClick = {
+                                    if (isConnected && connectedDevice != null) {
+                                        onDisconnectDevice(connectedDevice)
+                                    } else {
+                                        onStartClick()
+                                    }
+                                },
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = cs.primary,
+                                    containerColor = if (isConnected) cs.error else cs.primary,
                                     contentColor = cs.onPrimary
                                 ),
                                 shape = RoundedCornerShape(999.dp),
@@ -292,7 +308,7 @@ fun ConnectionScreen(
                                 Icon(Icons.Default.Bluetooth, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    if (isConnected) "Reconnect" else "Connect",
+                                    if (isConnected) "Disconnect" else "Connect",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -327,15 +343,26 @@ fun ConnectionScreen(
                             color = cs.onSurface
                         )
                     }
-                    if (!isConnected) {
-                        ScanningIndicator(cs.primary)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (isDiscovering.value) {
+                            ScanningIndicator(cs.primary)
+                        } else {
+                            TextButton(
+                                onClick = { activity.startDiscovery() }
+                            ) {
+                                Text("Scan", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
                     }
                 }
                 Spacer(Modifier.height(10.dp))
             }
 
             // Device list
-            items(devices) { device ->
+            items(devices, key = { it.address }) { device ->
                 val name = try { device.name ?: device.address } catch (_: SecurityException) { device.address }
                 val isPaired = try { device.bondState == BluetoothDevice.BOND_BONDED } catch (_: SecurityException) { false }
                 val address = try { device.address } catch (_: SecurityException) { "" }
@@ -392,7 +419,8 @@ fun ConnectionScreen(
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = textColor,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -493,6 +521,7 @@ fun ConnectionScreen(
             confirmButton = {
                 TextButton(onClick = {
                     showUnpairConfirm.value = null
+                    devices.remove(device)
                     onUnpairDevice(device)
                 }) { Text("Unpair", color = cs.error) }
             },

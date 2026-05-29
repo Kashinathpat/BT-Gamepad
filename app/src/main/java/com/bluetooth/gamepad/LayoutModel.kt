@@ -13,6 +13,15 @@ data class ButtonConfig(
     val sizeFrac: Float
 )
 
+// Duplicated buttons get an "_N" suffix (e.g. "A_2"). The control type is the part before the
+// first underscore. No palette id contains an underscore, so this is unambiguous. All id-based
+// dispatch (input wiring, rendering, labels) must use the base id so duplicates behave like their
+// originals.
+val ButtonConfig.baseId: String
+    get() = id.baseButtonId()
+
+fun String.baseButtonId(): String = substringBefore('_')
+
 data class ControllerLayout(
     val id: String,
     val name: String,
@@ -74,24 +83,27 @@ class LayoutRepository(private val prefs: SharedPreferences) {
                 }
             })
         }
-        prefs.edit().putString("layout_${layout.id}", json.toString()).apply()
+        val editor = prefs.edit().putString("layout_${layout.id}", json.toString())
         if (!layout.isDefault) {
             val ids = prefs.getString("layout_ids", "") ?: ""
             val list = if (ids.isBlank()) mutableListOf() else ids.split(",").toMutableList()
             if (!list.contains(layout.id)) {
                 list.add(layout.id)
-                prefs.edit().putString("layout_ids", list.joinToString(",")).apply()
+                editor.putString("layout_ids", list.joinToString(","))
             }
         }
+        editor.apply()
     }
 
     fun delete(id: String) {
         if (id == ControllerLayout.DEFAULT_ID) return
-        prefs.edit().remove("layout_${id}").apply()
         val ids = prefs.getString("layout_ids", "") ?: ""
         val list = if (ids.isBlank()) mutableListOf() else ids.split(",").toMutableList()
         list.remove(id)
-        prefs.edit().putString("layout_ids", list.joinToString(",")).apply()
+        prefs.edit()
+            .remove("layout_${id}")
+            .putString("layout_ids", list.joinToString(","))
+            .apply()
     }
 
     fun load(id: String): ControllerLayout? {

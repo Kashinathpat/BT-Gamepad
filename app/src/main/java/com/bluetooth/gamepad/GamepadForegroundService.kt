@@ -14,16 +14,11 @@ class GamepadForegroundService : Service() {
 
     companion object {
         const val ACTION_START = "com.bluetooth.gamepad.START"
-        const val ACTION_STOP  = "com.bluetooth.gamepad.STOP"
         private const val CHANNEL_ID  = "gamepad_channel"
         private const val NOTIFICATION_ID = 1
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
         createChannel()
         val openIntent = PendingIntent.getActivity(
             this, 0,

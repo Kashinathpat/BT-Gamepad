@@ -115,7 +115,7 @@ fun LayoutEditorScreen(
     fun undo() {
         if (undoStack.isEmpty()) return
         redoStack.add(buttons.toList())
-        val prev = undoStack.removeLast()
+        val prev = undoStack.removeAt(undoStack.lastIndex)
         buttons.clear()
         buttons.addAll(prev)
     }
@@ -123,7 +123,7 @@ fun LayoutEditorScreen(
     fun redo() {
         if (redoStack.isEmpty()) return
         undoStack.add(buttons.toList())
-        val next = redoStack.removeLast()
+        val next = redoStack.removeAt(redoStack.lastIndex)
         buttons.clear()
         buttons.addAll(next)
     }
@@ -167,10 +167,20 @@ fun LayoutEditorScreen(
                         val w = canvasSize.value.width.toFloat()
                         val h = canvasSize.value.height.toFloat()
                         val cur = buttons[i]
-                        buttons[i] = cur.copy(
-                            xFrac = (cur.xFrac + dx / w).coerceIn(0.02f, 0.98f),
-                            yFrac = (cur.yFrac + dy / h).coerceIn(0.02f, 0.98f)
-                        )
+                        if (w > 0 && h > 0) {
+                            var cx = cur.xFrac * w + dx
+                            var cy = cur.yFrac * h + dy
+                            if (snapEnabled.value) {
+                                // Snap the button centre to the same 16.dp grid the canvas draws.
+                                val stepPx = 16f * density
+                                cx = (cx / stepPx).roundToInt() * stepPx
+                                cy = (cy / stepPx).roundToInt() * stepPx
+                            }
+                            buttons[i] = cur.copy(
+                                xFrac = (cx / w).coerceIn(0.02f, 0.98f),
+                                yFrac = (cy / h).coerceIn(0.02f, 0.98f)
+                            )
+                        }
                     }
                 },
                 onScale = { id, zoom ->
@@ -199,8 +209,17 @@ fun LayoutEditorScreen(
                 val h = canvasSize.value.height.toFloat()
                 if (w > 0 && h > 0) {
                     pushUndo()
-                    val existing = buttons.count { it.id.startsWith(template.id) }
-                    val newId = if (existing == 0) template.id else "${template.id}_${existing + 1}"
+                    // Generate a unique id: the bare template id for the first instance, then
+                    // "<id>_N" for duplicates. Probe for the next free suffix so deleting an
+                    // earlier duplicate can never produce a colliding id.
+                    val existingIds = buttons.mapTo(HashSet()) { it.id }
+                    val newId = if (template.id !in existingIds) {
+                        template.id
+                    } else {
+                        var n = 2
+                        while ("${template.id}_$n" in existingIds) n++
+                        "${template.id}_$n"
+                    }
                     buttons.add(template.copy(id = newId, xFrac = 0.5f, yFrac = 0.5f))
                     selectedId.value = newId
                     activeTool.value = EditorTool.SELECT
@@ -767,23 +786,6 @@ private fun InspectorPanel(
 
         InspectorDivider()
 
-        // Toggles
-        Column(
-            modifier = Modifier
-                .padding(horizontal = 12.dp, vertical = 10.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF111412))
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("Haptic on press", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = EditorOnSurface)
-                MiniToggle(on = true)
-            }
-        }
-
         Spacer(Modifier.height(8.dp))
 
         Box(
@@ -806,23 +808,6 @@ private fun InspectorPanel(
     }
 }
 
-@Composable
-private fun MiniToggle(on: Boolean, activeColor: Color = EditorPrimary) {
-    Box(
-        modifier = Modifier
-            .width(32.dp).height(20.dp)
-            .clip(RoundedCornerShape(99.dp))
-            .background(if (on) activeColor else Color(0xFF2A2D2B))
-    ) {
-        Box(
-            modifier = Modifier
-                .size(16.dp)
-                .offset(x = if (on) 14.dp else 2.dp, y = 2.dp)
-                .clip(CircleShape)
-                .background(if (on) EditorOnPrimary else EditorOnVariant)
-        )
-    }
-}
 
 @Composable
 private fun InspectorDivider() {
@@ -846,12 +831,12 @@ private fun PanelSectionLabel(text: String) {
 
 @Composable
 private fun EditorButtonVisual(btn: ButtonConfig, sizeDp: Float) {
-    when (btn.id) {
+    when (val base = btn.baseId) {
         "LSTICK", "RSTICK" -> {
             Box(modifier = Modifier.fillMaxSize().background(StickBase, CircleShape),
                 contentAlignment = Alignment.Center) {
                 Box(Modifier.size((sizeDp * 0.4f).dp).background(StickKnob, CircleShape))
-                Text(if (btn.id == "LSTICK") "L" else "R",
+                Text(if (base == "LSTICK") "L" else "R",
                     fontSize = (sizeDp * 0.22f).sp, fontWeight = FontWeight.Bold,
                     color = Color.White.copy(alpha = 0.7f))
             }
@@ -884,7 +869,7 @@ private fun EditorButtonVisual(btn: ButtonConfig, sizeDp: Float) {
         "Y"  -> EditorCircleBtn(BtnY, "Y", sizeDp)
         "LSB", "RSB" -> EditorCircleBtn(BtnSecondary, btn.label, sizeDp, 0.22f)
         "LB", "RB", "LT", "RT" -> {
-            val color = if (btn.id == "LT" || btn.id == "RT") BtnSecondary else BtnPrimary
+            val color = if (base == "LT" || base == "RT") BtnSecondary else BtnPrimary
             Box(Modifier.fillMaxSize().background(color, RoundedCornerShape(8.dp)), Alignment.Center) {
                 Text(btn.label, fontSize = (sizeDp * 0.28f).sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
@@ -909,27 +894,26 @@ private fun EditorCircleBtn(color: Color, label: String, sizeDp: Float, fontScal
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
-private fun btnDisplayName(id: String): String = when {
-    id == "A"      -> "A button";       id == "B"      -> "B button"
-    id == "X"      -> "X button";       id == "Y"      -> "Y button"
-    id == "LSTICK" -> "Left stick";     id == "RSTICK" -> "Right stick"
-    id == "DPAD"   -> "D-pad"
-    id == "LB"     -> "LB shoulder";   id == "RB"     -> "RB shoulder"
-    id == "LT"     -> "LT trigger";    id == "RT"     -> "RT trigger"
-    id == "LSB"    -> "L stick click"; id == "RSB"    -> "R stick click"
-    id == "SELECT" -> "Select";         id == "START"  -> "Start"
+private fun btnDisplayName(id: String): String = when (id.baseButtonId()) {
+    "A"      -> "A button";       "B"      -> "B button"
+    "X"      -> "X button";       "Y"      -> "Y button"
+    "LSTICK" -> "Left stick";     "RSTICK" -> "Right stick"
+    "DPAD"   -> "D-pad"
+    "LB"     -> "LB shoulder";   "RB"     -> "RB shoulder"
+    "LT"     -> "LT trigger";    "RT"     -> "RT trigger"
+    "LSB"    -> "L stick click"; "RSB"    -> "R stick click"
+    "SELECT" -> "Select";         "START"  -> "Start"
     else           -> id
 }
 
-private fun btnBadgeColors(id: String): Pair<Color, Color> = when {
-    id == "A"  -> BtnA to Color.White
-    id == "B"  -> BtnB to Color.White
-    id == "X"  -> BtnX to Color.White
-    id == "Y"  -> BtnY to Color.White
-    id.startsWith("LSTICK") || id.startsWith("RSTICK") ||
-        id.startsWith("LSB") || id.startsWith("RSB") -> Color(0xFF1E2E3A) to Color(0xFF7EB8D4)
-    id.startsWith("DPAD")   -> Color(0xFF2D4A3E) to Color(0xFF7FDCC4)
-    id.startsWith("LB")  || id.startsWith("RB")  -> BtnPrimary  to Color.White
-    id.startsWith("LT")  || id.startsWith("RT")  -> BtnSecondary to Color.White
+private fun btnBadgeColors(id: String): Pair<Color, Color> = when (id.baseButtonId()) {
+    "A"  -> BtnA to Color.White
+    "B"  -> BtnB to Color.White
+    "X"  -> BtnX to Color.White
+    "Y"  -> BtnY to Color.White
+    "LSTICK", "RSTICK", "LSB", "RSB" -> Color(0xFF1E2E3A) to Color(0xFF7EB8D4)
+    "DPAD"   -> Color(0xFF2D4A3E) to Color(0xFF7FDCC4)
+    "LB", "RB"  -> BtnPrimary  to Color.White
+    "LT", "RT"  -> BtnSecondary to Color.White
     else -> Color(0xFF252A27) to Color.White
 }

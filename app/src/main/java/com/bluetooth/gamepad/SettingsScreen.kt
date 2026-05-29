@@ -61,16 +61,17 @@ fun SettingsScreen(
     hapticIntensity: HapticIntensity,
     motionEnabled: Boolean,
     motionSensitivity: MotionSensitivity,
+    autoReconnect: Boolean,
     onThemeChange: (AppTheme) -> Unit,
     onWindowsModeToggle: (Boolean) -> Unit,
     onHapticIntensityChange: (HapticIntensity) -> Unit,
     onMotionEnabledChange: (Boolean) -> Unit,
     onMotionSensitivityChange: (MotionSensitivity) -> Unit,
+    onAutoReconnectChange: (Boolean) -> Unit,
     onBack: () -> Unit,
     contentPadding: PaddingValues = PaddingValues()
 ) {
     val cs = MaterialTheme.colorScheme
-    val autoReconnect = remember { mutableStateOf(true) }
 
     Scaffold(containerColor = cs.background) { innerPadding ->
         Column(
@@ -151,15 +152,6 @@ fun SettingsScreen(
                         onClick = { onThemeChange(AppTheme.SYSTEM) }
                     )
                 }
-                if (appTheme == AppTheme.AMOLED) {
-                    Text(
-                        "True Black saves battery on OLED screens.",
-                        fontSize = 12.sp,
-                        color = cs.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 10.dp, start = 4.dp),
-                        lineHeight = 18.sp
-                    )
-                }
             }
 
             Spacer(Modifier.height(24.dp))
@@ -195,8 +187,8 @@ fun SettingsScreen(
                     iconFg = cs.onPrimaryContainer,
                     title = "Auto-reconnect",
                     sub = "Resume last device on launch",
-                    checked = autoReconnect.value,
-                    onCheckedChange = { autoReconnect.value = it }
+                    checked = autoReconnect,
+                    onCheckedChange = onAutoReconnectChange
                 )
             }
 
@@ -246,7 +238,7 @@ fun SettingsScreen(
                     iconBg = cs.primaryContainer,
                     iconFg = cs.onPrimaryContainer,
                     title = "HID profile",
-                    sub = "Keyboard + gamepad over BT",
+                    sub = "Gamepad over Bluetooth",
                     trailingText = "Active",
                     trailingColor = cs.primary
                 )
@@ -297,7 +289,8 @@ private fun HapticIntensityRow(
     val context = LocalContext.current
     val hasVibrator = remember {
         val v = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
+            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+                ?: @Suppress("DEPRECATION") (context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator)
         } else {
             @Suppress("DEPRECATION")
             context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
