@@ -24,6 +24,11 @@ class BluetoothHidGamepad(context: Context) {
     companion object {
         private const val TAG = "BtHidGamepad"
 
+        // Retry a report that the interrupt channel rejected (returned false) because it was busy.
+        // Fast back-to-back reports (like a quick tap's down then up) can overflow the BT buffer.
+        private const val SEND_RETRY_LIMIT = 20
+        private const val SEND_RETRY_DELAY_MS = 2L
+
         // DInput descriptor: 16 flat buttons + 4 axes (-127..127)
         private val DESCRIPTOR_DINPUT = byteArrayOf(
             0x05, 0x01,                     // Usage Page (Generic Desktop)
@@ -175,10 +180,12 @@ class BluetoothHidGamepad(context: Context) {
     private val report = ByteArray(6)
     private val reportLock = Any()
 
-    // Coalesces sends: at most one transmit task is in flight at a time. Rapid input (e.g. gyro at
-    // SENSOR_DELAY_FASTEST plus stick drags) marks the report dirty instead of queuing a task each,
-    // so the executor never backs up and always transmits the latest state.
-    private val sendPending = java.util.concurrent.atomic.AtomicBoolean(false)
+    // Last report snapshot handed to the executor, guarded by reportLock. Used to drop only
+    // *duplicate consecutive* states (e.g. a stick repeating the same value), while still queuing
+    // every genuine change. Buttons are edges, not levels: a fast tap (press then release before
+    // the previous send completes) must transmit both the pressed and released frames, so we
+    // snapshot at enqueue time rather than letting one in-flight task re-read the latest report.
+    private var lastEnqueued: ByteArray? = null
 
     private var hidExecutor = Executors.newSingleThreadExecutor()
 
@@ -226,8 +233,8 @@ class BluetoothHidGamepad(context: Context) {
                 synchronized(reportLock) {
                     resetReport()
                     if (!isWindowsDInputMode) report[1] = ((HAT_NEUTRAL and 0x0F) shl 4).toByte()
+                    sendReportLocked()
                 }
-                sendReport()
             } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
                 connectedDevice = null
                 isConnected = false
@@ -367,8 +374,8 @@ class BluetoothHidGamepad(context: Context) {
     fun setButtonState(index: Int, pressed: Boolean) {
         synchronized(reportLock) {
             setButtonStateInternal(index, pressed)
+            sendReportLocked()
         }
-        sendReport()
     }
 
     fun setDpadState(up: Boolean, down: Boolean, left: Boolean, right: Boolean) {
@@ -378,8 +385,8 @@ class BluetoothHidGamepad(context: Context) {
             setButtonStateInternal(BUTTON_DPAD_DOWN, down)
             setButtonStateInternal(BUTTON_DPAD_LEFT, left)
             setButtonStateInternal(BUTTON_DPAD_RIGHT, right)
+            sendReportLocked()
         }
-        sendReport()
     }
 
     fun setHat(hatValue: Int) {
@@ -387,16 +394,16 @@ class BluetoothHidGamepad(context: Context) {
         synchronized(reportLock) {
             // hat in upper 4 bits of report[1]; lower 4 bits are buttons 8-11
             report[1] = ((report[1].toInt() and 0x0F) or ((hatValue and 0x0F) shl 4)).toByte()
+            sendReportLocked()
         }
-        sendReport()
     }
 
     fun setLeftStick(x: Float, y: Float) {
         synchronized(reportLock) {
             report[2] = floatToByte(x)
             report[3] = floatToByte(y)
+            sendReportLocked()
         }
-        sendReport()
     }
 
     // Right stick has two independent input sources — on-screen touch and motion (gyro).
@@ -412,8 +419,8 @@ class BluetoothHidGamepad(context: Context) {
             rightTouchX = x
             rightTouchY = y
             applyRightStick()
+            sendReportLocked()
         }
-        sendReport()
     }
 
     fun setRightStickMotion(x: Float, y: Float) {
@@ -421,8 +428,8 @@ class BluetoothHidGamepad(context: Context) {
             rightMotionX = x
             rightMotionY = y
             applyRightStick()
+            sendReportLocked()
         }
-        sendReport()
     }
 
     // Must be called while holding reportLock.
@@ -438,6 +445,8 @@ class BluetoothHidGamepad(context: Context) {
         rightTouchY = 0f
         rightMotionX = 0f
         rightMotionY = 0f
+        // Force the next send to transmit afresh rather than comparing against a stale snapshot.
+        lastEnqueued = null
     }
 
     private fun floatToByte(f: Float): Byte {
@@ -445,25 +454,40 @@ class BluetoothHidGamepad(context: Context) {
         return (clamped * 127f).toInt().toByte()
     }
 
-    private fun sendReport() {
-        // If a transmit is already scheduled, it will pick up the latest report — nothing to do.
-        if (!sendPending.compareAndSet(false, true)) return
+    // Must be called while holding reportLock.
+    private fun sendReportLocked() {
+        if (lastEnqueued != null && report.contentEquals(lastEnqueued)) return
+        val snapshot = report.clone()
+        lastEnqueued = snapshot
         try {
             hidExecutor.submit {
-                sendPending.set(false)
                 val device = connectedDevice ?: return@submit
                 val hid = hidDevice ?: return@submit
-                val reportCopy = synchronized(reportLock) { report.clone() }
                 try {
-                    hid.sendReport(device, 0, reportCopy)
+                    // sendReport returns false when the interrupt channel is momentarily busy and
+                    // the report was NOT transmitted. Ignoring that silently drops frames — during a
+                    // fast tap the pressed frame can be lost while the following released frame
+                    // succeeds, so the host never sees the press. Retry briefly so the frame lands.
+                    var success = false
+                    var attempts = 0
+                    while (!success && attempts < SEND_RETRY_LIMIT) {
+                        success = hid.sendReport(device, 0, snapshot)
+                        if (!success) {
+                            try {
+                                Thread.sleep(SEND_RETRY_DELAY_MS)
+                            } catch (_: InterruptedException) {
+                                Thread.currentThread().interrupt()
+                                return@submit
+                            }
+                            attempts++
+                        }
+                    }
                 } catch (e: SecurityException) {
                     Log.e(TAG, "SecurityException sendReport in executor", e)
                 }
             }
         } catch (_: Exception) {
-            // Executor rejected the task (e.g. shut down mid-stop) — clear the gate so a later
-            // send can be scheduled again.
-            sendPending.set(false)
+            // Executor rejected the task (e.g. shut down mid-stop); nothing more to do.
         }
     }
 

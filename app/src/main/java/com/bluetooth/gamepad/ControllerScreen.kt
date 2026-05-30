@@ -33,6 +33,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.input.pointer.PointerId
+import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
 import android.content.Context
 import android.os.Build
@@ -228,18 +230,41 @@ fun GamepadBtn(
             .background(bgColor, shape)
             .pointerInput(Unit) {
                 awaitPointerEventScope {
+                    // Track the specific pointer ids this button owns. Attribution by pointer id
+                    // (not by re-deriving "is a finger down" from positions every frame) is what
+                    // makes fast taps reliable and lets any number of buttons be held at once: each
+                    // finger is claimed and consumed by exactly one button.
+                    val ownedPointers = mutableSetOf<PointerId>()
                     while (true) {
                         val event = awaitPointerEvent()
-                        val myChanges = event.changes.filter { c ->
-                            c.position.x >= 0f && c.position.x <= size.width &&
-                            c.position.y >= 0f && c.position.y <= size.height
+                        // A press and its release can arrive in the SAME event (a quick tap, or
+                        // batched events). Detect a down-edge this frame so the click still fires
+                        // even if the finger is already up by the end of the event.
+                        var sawDownEdge = false
+                        for (change in event.changes) {
+                            val inBounds = change.position.x >= 0f && change.position.x <= size.width &&
+                                change.position.y >= 0f && change.position.y <= size.height
+                            val newClaim = change.id !in ownedPointers && !change.isConsumed &&
+                                (change.changedToDown() || change.pressed) && inBounds
+                            if (newClaim) {
+                                ownedPointers.add(change.id)
+                                sawDownEdge = true
+                            }
+                            if (change.id in ownedPointers) {
+                                change.consume()
+                                // Release the moment this finger is no longer pressed — including
+                                // when it went down and up within this very event.
+                                if (!change.pressed) ownedPointers.remove(change.id)
+                            }
                         }
-                        val isDown = myChanges.any { it.pressed }
-                        if (isDown && !pressed.value) {
+                        // Emit a full press/release. If a down-edge happened this frame but the
+                        // finger already lifted, fire onDown then onUp so the tap is never lost.
+                        if (sawDownEdge && !pressed.value) {
                             pressed.value = true
                             vibrateForIntensity(vibrator, hapticIntensity)
                             onDown()
-                        } else if (!isDown && pressed.value) {
+                        }
+                        if (ownedPointers.isEmpty() && pressed.value) {
                             pressed.value = false
                             onUp()
                         }
@@ -439,13 +464,37 @@ fun DpadControl(isWindowsMode: Boolean, gamepad: BluetoothHidGamepad?, hapticInt
             .size(size)
             .pointerInput(Unit) {
                 awaitPointerEventScope {
+                    // Own a single pointer by id so the d-pad tracks the finger that landed on it,
+                    // not whichever pointer happens to be first in the event (which may belong to
+                    // another control when several fingers are down).
+                    // Capture the gesture-scope size up front: `size` alone resolves to the DpadControl
+                    // `size: Dp` parameter here, and inside the change lambdas it would resolve to the
+                    // PointerInputChange receiver. this.size is the pointer scope's IntSize.
+                    val boundsW = this.size.width.toFloat()
+                    val boundsH = this.size.height.toFloat()
+                    var ownedPointer: PointerId? = null
                     while (true) {
                         val event = awaitPointerEvent()
-                        val anyPressed = event.changes.any { it.pressed }
-                        if (anyPressed) {
-                            val pos = event.changes.first { it.pressed }.position
-                            update(pos.x, pos.y, this.size.width / 2f, this.size.height / 2f)
-                        } else {
+                        if (ownedPointer == null) {
+                            val down = event.changes.firstOrNull {
+                                !it.isConsumed && it.changedToDown() &&
+                                    it.position.x >= 0f && it.position.x <= boundsW &&
+                                    it.position.y >= 0f && it.position.y <= boundsH
+                            }
+                            if (down != null) {
+                                ownedPointer = down.id
+                                down.consume()
+                                // Apply the press immediately so even a finger that lifts in the
+                                // same event still registers the direction before release.
+                                update(down.position.x, down.position.y, boundsW / 2f, boundsH / 2f)
+                            }
+                        }
+                        val tracked = ownedPointer?.let { id -> event.changes.firstOrNull { it.id == id } }
+                        if (tracked != null && tracked.pressed) {
+                            tracked.consume()
+                            update(tracked.position.x, tracked.position.y, boundsW / 2f, boundsH / 2f)
+                        } else if (ownedPointer != null) {
+                            ownedPointer = null
                             release()
                         }
                     }
