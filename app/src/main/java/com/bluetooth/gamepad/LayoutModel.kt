@@ -1,5 +1,7 @@
 package com.bluetooth.gamepad
 
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
@@ -21,6 +23,19 @@ val ButtonConfig.baseId: String
     get() = id.baseButtonId()
 
 fun String.baseButtonId(): String = substringBefore('_')
+
+/**
+ * Mutable working state for one layout-editing session. Held by the host (MainActivity) so it
+ * survives the editor leaving composition during a Test preview, and is discarded only when the
+ * user leaves the editor entirely. Uses Compose snapshot state so the editor observes changes.
+ */
+class EditorSession(layout: ControllerLayout) {
+    val buttons = mutableStateListOf<ButtonConfig>().also { it.addAll(layout.buttons) }
+    val undoStack = mutableStateListOf<List<ButtonConfig>>()
+    val redoStack = mutableStateListOf<List<ButtonConfig>>()
+    val selectedId = mutableStateOf<String?>(null)
+    val edited = mutableStateOf(false)
+}
 
 data class ControllerLayout(
     val id: String,

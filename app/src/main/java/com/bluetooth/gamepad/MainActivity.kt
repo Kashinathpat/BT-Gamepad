@@ -62,6 +62,9 @@ class MainActivity : ComponentActivity() {
     private val currentTab = mutableStateOf(NavTab.CONNECT)
     private val activeLayoutId = mutableStateOf(ControllerLayout.DEFAULT_ID)
     private val editingLayout = mutableStateOf<ControllerLayout?>(null)
+    // Working state for the active edit session (buttons, undo/redo, selection, dirty flag). Held
+    // here so it survives the editor leaving composition during Test; discarded only on editor exit.
+    private val editorSession = mutableStateOf<EditorSession?>(null)
     // Transient layout shown by the editor's "Test" action. Held in memory only — never persisted —
     // so previewing unsaved edits does not overwrite the stored layout.
     private val previewLayout = mutableStateOf<ControllerLayout?>(null)
@@ -172,20 +175,20 @@ class MainActivity : ComponentActivity() {
                         motionSensitivity = motionSensitivity.value,
                         onStopClick = closeController
                     )
-                } else if (editingLayout.value != null) {
-                    BackHandler {
-                        editingLayout.value = null
-                        layoutsRefreshKey.value++
-                    }
+                } else if (editingLayout.value != null && editorSession.value != null) {
                     LayoutEditorScreen(
                         layout = editingLayout.value!!,
+                        session = editorSession.value!!,
                         repo = layoutRepo,
                         onBack = {
                             editingLayout.value = null
+                            editorSession.value = null
                             layoutsRefreshKey.value++
                         },
                         onTest = { testLayout ->
-                            // Preview only — keep the edits in memory and do not persist them.
+                            // Preview only — never persisted. The session keeps the in-progress edits
+                            // (and undo/redo) alive while the controller is shown, so returning to the
+                            // editor restores everything exactly.
                             previewLayout.value = testLayout
                             controllerVisible.value = true
                         }
@@ -257,7 +260,11 @@ class MainActivity : ComponentActivity() {
                                             previewLayout.value = null
                                             controllerVisible.value = true
                                         },
-                                        onEdit = { layout -> editingLayout.value = layout },
+                                        onEdit = { layout ->
+                                            // Fresh working session for this edit; discarded on exit.
+                                            editorSession.value = EditorSession(layout)
+                                            editingLayout.value = layout
+                                        },
                                         contentPadding = innerPadding
                                     )
                                 }
