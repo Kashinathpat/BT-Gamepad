@@ -398,6 +398,15 @@ class BluetoothHidGamepad(context: Context) {
         }
     }
 
+    // Zero every control and transmit the neutral state (used when the input surface restarts).
+    fun resetAll() {
+        synchronized(reportLock) {
+            resetReport()
+            if (!isWindowsDInputMode) report[1] = ((HAT_NEUTRAL and 0x0F) shl 4).toByte()
+            sendReportLocked()
+        }
+    }
+
     fun setLeftStick(x: Float, y: Float) {
         synchronized(reportLock) {
             report[2] = floatToByte(x)
