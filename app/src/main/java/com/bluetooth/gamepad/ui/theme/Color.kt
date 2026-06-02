@@ -107,7 +107,6 @@ val StatusError      = Color(0xFFB71C1C)
 val ControllerBg   = Color(0xFF111318)
 val BtnPrimary     = Color(0xFF1E2A3A)
 val BtnSecondary   = Color(0xFF162032)
-val BtnDisconnect  = Color(0xFF8B0000)
 val StickBase      = Color(0xFF162032)
 val StickKnob      = Color(0xFF3D5A80)
 val DpadNormal     = Color(0xFF3D5A80)
@@ -118,14 +117,7 @@ val BtnB = Color(0xFFB71C1C)
 val BtnX = Color(0xFF0D47A1)
 val BtnY = Color(0xFFF57F17)
 
-// ── Overlay pill background ──────────────────────────────────────────────────
-val OverlayPill      = Color(0x8C000000)
 val OverlayPillLight = Color(0x73000000)
-
-// ── Editor UI accents ────────────────────────────────────────────────────────
-val EditorSelected = Color(0xFFFFEB3B)
-val EditorSave     = Color(0xFF69F0AE)
-val EditorDelete   = Color(0xFFFF6B6B)
 
 // ── On-controller text ───────────────────────────────────────────────────────
 val ControllerOnBtn = Color(0xFFFFFFFF)

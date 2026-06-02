@@ -33,7 +33,6 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.ContextCompat
@@ -227,13 +226,7 @@ class MainActivity : ComponentActivity() {
                                     hidConnectionState = hidConnectionState.value,
                                     connectedDeviceName = connectedDeviceName.value,
                                     ownDeviceName = ownDeviceName.value,
-                                    isWindowsMode = isWindowsMode.value,
                                     onStartClick = { requestPermissionsAndInit() },
-                                    onWindowsModeToggle = { value ->
-                                        isWindowsMode.value = value
-                                        prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
-                                        gamepad?.switchMode(value)
-                                    },
                                     onPairDevice = { device -> pairDevice(device) },
                                     onUnpairDevice = { device -> unpairDevice(device) },
                                     connectedDeviceAddress = gamepad?.connectedDevice?.address ?: "",
@@ -301,7 +294,6 @@ class MainActivity : ComponentActivity() {
                                         autoReconnect.value = value
                                         prefs.edit().putBoolean("autoReconnect", value).apply()
                                     },
-                                    onBack = { currentTab.value = NavTab.CONNECT },
                                     contentPadding = innerPadding
                                 )
                             }

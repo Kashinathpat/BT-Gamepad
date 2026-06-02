@@ -105,7 +105,6 @@ fun ControllerScreen(
     val gyroX = remember { mutableFloatStateOf(0f) }
     val gyroY = remember { mutableFloatStateOf(0f) }
     val motionManager = remember { MotionSensorManager(context) }
-    val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val vibrator = remember { obtainVibrator(context) }
 
     DisposableEffect(motionEnabled, motionSensitivity) {
@@ -535,18 +534,13 @@ private fun vibrateForIntensity(vibrator: Vibrator, intensity: HapticIntensity) 
         HapticIntensity.STRONG -> 70L
         HapticIntensity.OFF    -> return
     }
+    val amplitude = when (intensity) {
+        HapticIntensity.LIGHT  -> 60
+        HapticIntensity.MEDIUM -> 120
+        HapticIntensity.STRONG -> 255
+        HapticIntensity.OFF    -> return
+    }
     mainHandler.post {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val amplitude = when (intensity) {
-                HapticIntensity.LIGHT  -> 60
-                HapticIntensity.MEDIUM -> 120
-                HapticIntensity.STRONG -> 255
-                HapticIntensity.OFF    -> return@post
-            }
-            vibrator.vibrate(VibrationEffect.createOneShot(ms, amplitude))
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(ms)
-        }
+        vibrator.vibrate(VibrationEffect.createOneShot(ms, amplitude))
     }
 }
