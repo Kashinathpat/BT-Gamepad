@@ -636,6 +636,9 @@ private val paletteItems = listOf(
     PaletteItem(ButtonConfig("DPAD",   "D",      0.5f, 0.5f, 0.18f), "D-pad",         "+",   Color(0xFF2D4A3E),       EditorPrimary),
     PaletteItem(ButtonConfig("LSTICK", "L",      0.5f, 0.5f, 0.18f), "Left stick",    "L",   Color(0xFF1E2E3A),       Color(0xFF7EB8D4)),
     PaletteItem(ButtonConfig("RSTICK", "R",      0.5f, 0.5f, 0.18f), "Right stick",   "R",   Color(0xFF1E2E3A),       Color(0xFF7EB8D4)),
+    PaletteItem(ButtonConfig("TPADL",  "L",      0.5f, 0.5f, 0.22f), "Pad · L stick", "TL",  Color(0xFF26323D),       Color(0xFF9DC9E0)),
+    PaletteItem(ButtonConfig("TPADR",  "R",      0.5f, 0.5f, 0.22f), "Pad · R stick", "TR",  Color(0xFF26323D),       Color(0xFF9DC9E0)),
+    PaletteItem(ButtonConfig("TPADD",  "+",      0.5f, 0.5f, 0.22f), "Pad · D-pad",   "TD",  Color(0xFF26323D),       Color(0xFF7FDCC4)),
     PaletteItem(ButtonConfig("LB",     "LB",     0.5f, 0.5f, 0.10f), "Shoulder LB",   "LB",  BtnPrimary,              Color.White),
     PaletteItem(ButtonConfig("RB",     "RB",     0.5f, 0.5f, 0.10f), "Shoulder RB",   "RB",  BtnPrimary,              Color.White),
     PaletteItem(ButtonConfig("LT",     "LT",     0.5f, 0.5f, 0.10f), "Trigger LT",    "LT",  BtnSecondary,            Color.White),
@@ -857,7 +860,7 @@ private fun MiniBtn(label: String, modifier: Modifier = Modifier, onClick: () ->
 @Composable
 private fun BoxScope.AddPanel(onAdd: (ButtonConfig) -> Unit, onClose: () -> Unit, containerSize: IntSize) {
     DraggablePanel(
-        width = 300.dp,
+        width = 360.dp,
         initialAlignment = Alignment.Center,
         containerSize = containerSize,
         header = { dragModifier ->
@@ -883,32 +886,35 @@ private fun BoxScope.AddPanel(onAdd: (ButtonConfig) -> Unit, onClose: () -> Unit
             modifier = Modifier.padding(12.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            paletteItems.chunked(4).forEach { rowItems ->
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            val perRow = 6
+            paletteItems.chunked(perRow).forEach { rowItems ->
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                     rowItems.forEach { item ->
                         Column(
                             modifier = Modifier
                                 .weight(1f)
-                                .height(62.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .height(64.dp)
+                                .clip(RoundedCornerShape(10.dp))
                                 .background(EditorGlassFill)
-                                .clickable { onAdd(item.template) },
+                                .clickable { onAdd(item.template) }
+                                .padding(horizontal = 2.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
                             Box(
-                                modifier = Modifier.size(30.dp).clip(RoundedCornerShape(9.dp)).background(item.color),
+                                modifier = Modifier.size(28.dp).clip(RoundedCornerShape(8.dp)).background(item.color),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(item.letter, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = item.onColor)
+                                Text(item.letter, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = item.onColor)
                             }
-                            Spacer(Modifier.height(5.dp))
-                            Text(item.displayLabel, fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
-                                color = EditorGlassOn, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.height(4.dp))
+                            Text(item.displayLabel, fontSize = 8.sp, fontWeight = FontWeight.SemiBold,
+                                color = EditorGlassOn, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center, lineHeight = 9.sp)
                         }
                     }
                     // Pad the final partial row so tiles keep a consistent width.
-                    repeat(4 - rowItems.size) { Spacer(Modifier.weight(1f)) }
+                    repeat(perRow - rowItems.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
@@ -951,6 +957,23 @@ private fun EditorButtonVisual(btn: ButtonConfig, sizeDp: Float) {
                 }
             }
         }
+        "TPADL", "TPADR", "TPADD" -> {
+            val tag = when (base) { "TPADL" -> "L"; "TPADR" -> "R"; else -> "+" }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF1A2229), RoundedCornerShape(14.dp))
+                    .border(1.5.dp, StickKnob.copy(alpha = 0.5f), RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("PAD", fontSize = (sizeDp * 0.13f).sp, fontWeight = FontWeight.Bold,
+                        color = Color.White.copy(alpha = 0.45f))
+                    Text(tag, fontSize = (sizeDp * 0.26f).sp, fontWeight = FontWeight.Bold,
+                        color = Color(0xFF9DC9E0))
+                }
+            }
+        }
         "A"  -> EditorCircleBtn(BtnA, "A", sizeDp)
         "B"  -> EditorCircleBtn(BtnB, "B", sizeDp)
         "X"  -> EditorCircleBtn(BtnX, "X", sizeDp)
@@ -987,6 +1010,9 @@ private fun btnDisplayName(id: String): String = when (id.baseButtonId()) {
     "X"      -> "X button";       "Y"      -> "Y button"
     "LSTICK" -> "Left stick";     "RSTICK" -> "Right stick"
     "DPAD"   -> "D-pad"
+    "TPADL"  -> "Touchpad → L stick"
+    "TPADR"  -> "Touchpad → R stick"
+    "TPADD"  -> "Touchpad → D-pad"
     "LB"     -> "LB shoulder";   "RB"     -> "RB shoulder"
     "LT"     -> "LT trigger";    "RT"     -> "RT trigger"
     "LSB"    -> "L stick click"; "RSB"    -> "R stick click"
@@ -1000,6 +1026,7 @@ private fun btnBadgeColors(id: String): Pair<Color, Color> = when (id.baseButton
     "X"  -> BtnX to Color.White
     "Y"  -> BtnY to Color.White
     "LSTICK", "RSTICK", "LSB", "RSB" -> Color(0xFF1E2E3A) to Color(0xFF7EB8D4)
+    "TPADL", "TPADR", "TPADD"        -> Color(0xFF26323D) to Color(0xFF9DC9E0)
     "DPAD"   -> Color(0xFF2D4A3E) to Color(0xFF7FDCC4)
     "LB", "RB"  -> BtnPrimary  to Color.White
     "LT", "RT"  -> BtnSecondary to Color.White

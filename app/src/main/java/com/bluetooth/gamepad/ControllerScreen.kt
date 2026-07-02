@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -233,6 +234,11 @@ fun ControllerScreen(
                         offset = stickOffsets[btn.id] ?: Offset.Zero
                     )
                     "DPAD" -> DpadVisual(dir = dpadDirs[btn.id], size = btnDp)
+                    "TPADL", "TPADR", "TPADD" -> TouchpadVisual(
+                        size = btnDp,
+                        mode = btn.baseId,
+                        dir = if (btn.baseId == "TPADD") dpadDirs[btn.id] else null
+                    )
                     else -> ButtonVisual(
                         spec = buttonSpec(btn.baseId, btn.label, btnDp.value),
                         size = btnDp,
@@ -375,6 +381,69 @@ private fun buildControls(
                     )
                 )
             }
+            "TPADL", "TPADR", "TPADD" -> {
+                // Touchpad: a plain surface mimicking a chosen control. The mapped mode is baked into
+                // the base id at placement (TPADL=left stick, TPADR=right stick, TPADD=d-pad).
+                when (btn.baseId) {
+                    "TPADD" -> {
+                        // D-pad mode: 8-way direction taken from where the finger first lands, so the
+                        // initial touch sets the origin and dragging away from it picks a direction.
+                        var originX = 0f
+                        var originY = 0f
+                        val dead = btnPx * 0.12f
+                        fun apply(localX: Float, localY: Float) {
+                            val dx = localX - originX
+                            val dy = localY - originY
+                            val newH = when { dx > dead -> DpadDir.RIGHT; dx < -dead -> DpadDir.LEFT; else -> null }
+                            val newV = when { dy < -dead -> DpadDir.UP;  dy > dead  -> DpadDir.DOWN; else -> null }
+                            val prev = dpadDirs[btn.id]
+                            if (prev == null || prev.h != newH || prev.v != newV) {
+                                val isNewPress = (newH != null && newH != prev?.h) || (newV != null && newV != prev?.v)
+                                if (isNewPress) vibrateForIntensity(vibrator, hapticIntensity)
+                                dpadDirs[btn.id] = DpadState(newH, newV)
+                                sendDpad(gamepad, isWindowsMode, newH, newV)
+                            }
+                        }
+                        list.add(
+                            RuntimeControl(
+                                left, top, right, bottom,
+                                onDown = { lx, ly -> originX = lx; originY = ly; apply(lx, ly) },
+                                onMove = { lx, ly -> apply(lx, ly) },
+                                onUp = {
+                                    dpadDirs[btn.id] = DpadState(null, null)
+                                    sendDpad(gamepad, isWindowsMode, null, null)
+                                }
+                            )
+                        )
+                    }
+                    else -> {
+                        // Stick mode (trackpad style): the point where the finger first lands is the
+                        // origin ("centre") for that touch. The stick value is the offset from that
+                        // origin, so the same physical drag gives the same deflection wherever you
+                        // started. Releasing springs to centre; the next touch sets a fresh origin.
+                        val isRight = btn.baseId == "TPADR"
+                        // Full deflection when dragged ~40% of the pad width from the origin.
+                        val range = btnPx * 0.4f
+                        var originX = 0f
+                        var originY = 0f
+                        fun apply(localX: Float, localY: Float) {
+                            val nx = if (range > 0f) ((localX - originX) / range).coerceIn(-1f, 1f) else 0f
+                            val ny = if (range > 0f) ((localY - originY) / range).coerceIn(-1f, 1f) else 0f
+                            if (isRight) gamepad?.setRightStickTouch(nx, ny) else gamepad?.setLeftStick(nx, ny)
+                        }
+                        list.add(
+                            RuntimeControl(
+                                left, top, right, bottom,
+                                onDown = { lx, ly -> originX = lx; originY = ly; apply(lx, ly) },
+                                onMove = { lx, ly -> apply(lx, ly) },
+                                onUp = {
+                                    if (isRight) gamepad?.setRightStickTouch(0f, 0f) else gamepad?.setLeftStick(0f, 0f)
+                                }
+                            )
+                        )
+                    }
+                }
+            }
             else -> {
                 val index = when (btn.baseId) {
                     "LB", "RB", "LT", "RT" -> shoulderIndex(btn.baseId, isWindowsMode)
@@ -508,6 +577,24 @@ private fun DpadVisual(dir: DpadState?, size: Dp) {
                 )
             }
         }
+    }
+}
+
+// Touchpad: a plain surface. No moving knob — like a laptop trackpad, where you first touch is the
+// origin for that touch. D-pad mode lights the border while a direction is held.
+@Composable
+private fun TouchpadVisual(size: Dp, mode: String, dir: DpadState?) {
+    val label = when (mode) { "TPADL" -> "L"; "TPADR" -> "R"; else -> "+" }
+    val active = mode == "TPADD" && (dir?.h != null || dir?.v != null)
+    val border = if (active) DpadPressed.copy(alpha = 0.5f) else StickKnob.copy(alpha = 0.4f)
+    Box(
+        modifier = Modifier
+            .size(size)
+            .background(StickBase.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+            .border(1.5.dp, border, RoundedCornerShape(14.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, fontSize = (size.value * 0.16f).sp, fontWeight = FontWeight.Bold, color = StickLabel)
     }
 }
 
