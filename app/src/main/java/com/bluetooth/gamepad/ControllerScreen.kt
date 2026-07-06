@@ -110,12 +110,11 @@ fun ControllerScreen(
 
     DisposableEffect(motionEnabled, motionSensitivity) {
         if (motionEnabled && motionManager.isSupported) {
-            val scale = MotionSensorManager.sensitivityScale(motionSensitivity)
             motionManager.onMotion = { x, y ->
                 // Sensor fires on a background thread; marshal to main before touching Compose state.
                 mainHandler.post {
-                    gyroX.floatValue = (x * scale).coerceIn(-1f, 1f)
-                    gyroY.floatValue = (y * scale).coerceIn(-1f, 1f)
+                    gyroX.floatValue = x
+                    gyroY.floatValue = y
                 }
             }
             motionManager.start(motionSensitivity)

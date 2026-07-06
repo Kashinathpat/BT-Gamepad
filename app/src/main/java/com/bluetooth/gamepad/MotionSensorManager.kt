@@ -5,119 +5,194 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.os.Build
-import android.view.Surface
-import android.view.WindowManager
+import android.os.Handler
+import android.os.HandlerThread
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.min
+import kotlin.math.sign
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 enum class MotionSensitivity { LOW, MEDIUM, HIGH }
 
+/**
+ * Gyro-to-stick: rotation accumulates into a held stick position (like PUBG Mobile's gyro aim),
+ * and recenters only while the phone is held still. Unlike a pure rate mapping, a slow deliberate
+ * turn keeps the stick deflected instead of springing back the instant you slow down.
+ */
 class MotionSensorManager(private val context: Context) {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val rotationSensor: Sensor? =
-        sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
-            ?: sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+    private val gyroSensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+    private val accelSensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
-    val isSupported: Boolean get() = rotationSensor != null
+    val isSupported: Boolean get() = gyroSensor != null
 
+    /** Emits stick x,y in [-1,1] on a background thread. */
     var onMotion: ((x: Float, y: Float) -> Unit)? = null
 
-    private var baseAngles: FloatArray? = null
-    private val rotMatrix = FloatArray(9)
-    private val remappedMatrix = FloatArray(9)
-    private val orientation = FloatArray(3)
+    private var degPerSecForMax = 90f
 
-    private var smoothX = 0f
-    private var smoothY = 0f
-    private val SMOOTHING = 0.35f
+    private var biasX = 0f; private var biasY = 0f; private var biasZ = 0f
+    private var biasInitialized = false
 
-    private val DEAD_ZONE = 0.04f
+    private var gravX = 0f; private var gravY = 0f; private var gravZ = -1f
+    private var gravInitialized = false
+
+    private var accelAimX = 0f
+    private var accelAimY = 0f
+    private var accelAimZ = -9.81f
+
+    private var posX = 0f
+    private var posY = 0f
+
+    private var lastGyroTsNs = 0L
+    private var sensorThread: HandlerThread? = null
+
+    companion object {
+        private const val STILL_THRESHOLD = 0.03f
+        private const val BIAS_SMOOTH = 0.02f
+        private const val ACCEL_TRUST = 0.02f
+        private const val YAW_RELAX = 1.41f
+        private const val INTEGRATE_HALFLIFE_S = 0.15f
+        private const val SENSOR_PERIOD_US = 5000
+    }
 
     private val listener = object : SensorEventListener {
+        override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
         override fun onSensorChanged(event: SensorEvent) {
-            SensorManager.getRotationMatrixFromVector(rotMatrix, event.values)
-
-            // Remap axes based on actual display rotation so landscape-left and
-            // landscape-right both produce correct tilt directions.
-            val (axisX, axisY) = when (displayRotation()) {
-                Surface.ROTATION_270 -> SensorManager.AXIS_MINUS_X to SensorManager.AXIS_MINUS_Z
-                else                 -> SensorManager.AXIS_X        to SensorManager.AXIS_Z
+            when (event.sensor.type) {
+                Sensor.TYPE_ACCELEROMETER -> handleAccel(event)
+                Sensor.TYPE_GYROSCOPE    -> handleGyro(event)
             }
+        }
+    }
 
-            SensorManager.remapCoordinateSystem(rotMatrix, axisX, axisY, remappedMatrix)
-            SensorManager.getOrientation(remappedMatrix, orientation)
+    // Landscape aim frame (top edge to the player's left): aim = (-devY, devX, devZ).
+    private fun handleAccel(event: SensorEvent) {
+        accelAimX = -event.values[1]
+        accelAimY = event.values[0]
+        accelAimZ = event.values[2]
+    }
 
-            // orientation[1] = pitch (tilt forward/back) -> stick Y
-            // orientation[2] = roll  (tilt left/right)   -> stick X
-            val rawPitch = orientation[1]
-            val rawRoll  = orientation[2]
+    private fun handleGyro(event: SensorEvent) {
+        val ts = event.timestamp
+        if (lastGyroTsNs == 0L) { lastGyroTsNs = ts; return }
+        var dt = (ts - lastGyroTsNs) / 1_000_000_000f
+        lastGyroTsNs = ts
+        if (dt <= 0f) return
+        if (dt > 0.05f) dt = 0.05f
 
-            val base = baseAngles
-            if (base == null) {
-                baseAngles = floatArrayOf(rawRoll, rawPitch)
-                return
-            }
+        val gx = -event.values[1]
+        val gy = event.values[0]
+        val gz = event.values[2]
 
-            // Wrap angle differences to [-PI, PI] to avoid gimbal discontinuity jumps.
-            val dx = Math.IEEEremainder((rawRoll  - base[0]).toDouble(), 2.0 * Math.PI).toFloat()
-            val dy = Math.IEEEremainder((rawPitch - base[1]).toDouble(), 2.0 * Math.PI).toFloat()
+        val speed3 = sqrt(gx * gx + gy * gy + gz * gz)
+        val isStill = speed3 < STILL_THRESHOLD
+        if (!biasInitialized) {
+            biasX = gx; biasY = gy; biasZ = gz; biasInitialized = true
+        } else if (isStill) {
+            biasX += (gx - biasX) * BIAS_SMOOTH
+            biasY += (gy - biasY) * BIAS_SMOOTH
+            biasZ += (gz - biasZ) * BIAS_SMOOTH
+        }
+        val cgx = gx - biasX
+        val cgy = gy - biasY
+        val cgz = gz - biasZ
 
-            val x = applyDeadZone(dx).coerceIn(-1f, 1f)
-            val y = applyDeadZone(dy).coerceIn(-1f, 1f)
+        updateGravity(cgx, cgy, cgz, dt)
 
-            smoothX = smoothX * (1f - SMOOTHING) + x * SMOOTHING
-            smoothY = smoothY * (1f - SMOOTHING) + y * SMOOTHING
+        // Player-space rates: pitch stays local, yaw takes its sign from rotation about gravity so
+        // the hold angle (flat vs upright) does not matter and gravity error cannot leak in.
+        val worldYaw = cgy * gravY + cgz * gravZ
+        val yawMag = sqrt(cgy * cgy + cgz * cgz)
+        val yawRate = -sign(worldYaw) * min(abs(worldYaw) * YAW_RELAX, yawMag)
+        val pitchRate = cgx
 
-            onMotion?.invoke(smoothX, smoothY)
+        val maxRad = (degPerSecForMax * PI / 180.0).toFloat()
+        posX = (posX + yawRate / maxRad * dt * 3f).coerceIn(-1f, 1f)
+        posY = (posY + pitchRate / maxRad * dt * 3f).coerceIn(-1f, 1f)
+
+        // Recenter only while the phone is held still, so a slow deliberate turn holds its
+        // deflection instead of springing back the instant rotation slows down.
+        if (isStill) {
+            val decay = exp(-0.693f / INTEGRATE_HALFLIFE_S * dt)
+            posX *= decay
+            posY *= decay
         }
 
-        override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
+        var x = posX
+        var y = posY
+        val mag = sqrt(x * x + y * y)
+        if (mag > 1f) { x /= mag; y /= mag }
+
+        onMotion?.invoke(x, y)
+    }
+
+    // Complementary filter: rotate the stored gravity by the inverse of the device's rotation over
+    // dt (Rodrigues), then nudge it toward the accelerometer's "down" and renormalize.
+    private fun updateGravity(wx: Float, wy: Float, wz: Float, dt: Float) {
+        val ax = accelAimX; val ay = accelAimY; val az = accelAimZ
+        val al = sqrt(ax * ax + ay * ay + az * az)
+        if (!gravInitialized) {
+            if (al > 1e-6f) { gravX = -ax / al; gravY = -ay / al; gravZ = -az / al }
+            gravInitialized = true
+            return
+        }
+        val w = sqrt(wx * wx + wy * wy + wz * wz)
+        val angle = w * dt
+        if (angle > 1e-7f) {
+            val kx = -wx / w; val ky = -wy / w; val kz = -wz / w
+            val c = cos(angle); val s = sin(angle)
+            val dot = kx * gravX + ky * gravY + kz * gravZ
+            val crX = ky * gravZ - kz * gravY
+            val crY = kz * gravX - kx * gravZ
+            val crZ = kx * gravY - ky * gravX
+            gravX = gravX * c + crX * s + kx * dot * (1f - c)
+            gravY = gravY * c + crY * s + ky * dot * (1f - c)
+            gravZ = gravZ * c + crZ * s + kz * dot * (1f - c)
+        }
+        if (al > 1e-6f) {
+            gravX += (-ax / al - gravX) * ACCEL_TRUST
+            gravY += (-ay / al - gravY) * ACCEL_TRUST
+            gravZ += (-az / al - gravZ) * ACCEL_TRUST
+        }
+        val gl = sqrt(gravX * gravX + gravY * gravY + gravZ * gravZ)
+        if (gl > 1e-6f) { gravX /= gl; gravY /= gl; gravZ /= gl }
     }
 
     fun start(sensitivity: MotionSensitivity) {
-        if (rotationSensor == null) return
-        baseAngles = null
-        smoothX = 0f
-        smoothY = 0f
-        val rate = when (sensitivity) {
-            MotionSensitivity.LOW    -> SensorManager.SENSOR_DELAY_GAME
-            MotionSensitivity.MEDIUM -> SensorManager.SENSOR_DELAY_GAME
-            MotionSensitivity.HIGH   -> SensorManager.SENSOR_DELAY_FASTEST
+        if (gyroSensor == null) return
+        reset()
+        degPerSecForMax = when (sensitivity) {
+            MotionSensitivity.LOW    -> 150f
+            MotionSensitivity.MEDIUM -> 90f
+            MotionSensitivity.HIGH   -> 45f
         }
-        sensorManager.registerListener(listener, rotationSensor, rate)
+        val thread = HandlerThread("gyro-aim").apply { start() }
+        sensorThread = thread
+        val handler = Handler(thread.looper)
+        sensorManager.registerListener(listener, gyroSensor, SENSOR_PERIOD_US, handler)
+        accelSensor?.let { sensorManager.registerListener(listener, it, SENSOR_PERIOD_US, handler) }
     }
 
     fun stop() {
         sensorManager.unregisterListener(listener)
+        sensorThread?.quitSafely()
+        sensorThread = null
         onMotion = null
-        baseAngles = null
-        smoothX = 0f
-        smoothY = 0f
+        reset()
     }
 
-    private fun applyDeadZone(value: Float): Float {
-        return if (abs(value) < DEAD_ZONE) 0f else value
-    }
-
-    // Context.getDisplay() is API 30+; fall back to the window manager's display below that.
-    private fun displayRotation(): Int = try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            context.display?.rotation ?: Surface.ROTATION_90
-        } else {
-            @Suppress("DEPRECATION")
-            (context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
-                ?.defaultDisplay?.rotation ?: Surface.ROTATION_90
-        }
-    } catch (_: Exception) {
-        Surface.ROTATION_90
-    }
-
-    companion object {
-        fun sensitivityScale(s: MotionSensitivity): Float = when (s) {
-            MotionSensitivity.LOW    -> 1.2f
-            MotionSensitivity.MEDIUM -> 2.2f
-            MotionSensitivity.HIGH   -> 3.5f
-        }
+    private fun reset() {
+        biasInitialized = false
+        gravInitialized = false
+        lastGyroTsNs = 0L
+        posX = 0f; posY = 0f
+        gravX = 0f; gravY = 0f; gravZ = -1f
+        accelAimX = 0f; accelAimY = 0f; accelAimZ = -9.81f
     }
 }
