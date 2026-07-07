@@ -94,11 +94,14 @@ class MainActivity : ComponentActivity() {
                 @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
             device ?: return
             val state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
-            if (state == BluetoothDevice.BOND_BONDED) {
+            // Only auto-connect to a device we paired from the Pair button, not e.g. earbuds.
+            if (state == BluetoothDevice.BOND_BONDED && device.address == pendingPairAddress) {
+                pendingPairAddress = null
                 gamepad?.connectDevice(device)
             }
         }
     }
+    private var pendingPairAddress: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -436,8 +439,22 @@ class MainActivity : ComponentActivity() {
         } catch (_: SecurityException) { }
     }
 
+    // Make the phone discoverable so a PC can find and pair with it (system consent dialog).
+    fun makeDiscoverable() {
+        try {
+            startActivity(
+                Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
+                    putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
+                }
+            )
+        } catch (_: Exception) {
+            try { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) } catch (_: Exception) { }
+        }
+    }
+
     private fun pairDevice(device: BluetoothDevice) {
         try {
+            pendingPairAddress = device.address
             device.createBond()
         } catch (_: SecurityException) { }
     }

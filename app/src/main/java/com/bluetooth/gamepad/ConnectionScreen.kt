@@ -343,8 +343,13 @@ fun ConnectionScreen(
                     }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
+                        TextButton(
+                            onClick = { activity.makeDiscoverable() }
+                        ) {
+                            Text("Make visible", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
                         if (isDiscovering.value) {
                             ScanningIndicator(cs.primary)
                         } else {
