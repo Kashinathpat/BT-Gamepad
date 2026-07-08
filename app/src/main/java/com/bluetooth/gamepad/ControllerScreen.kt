@@ -21,9 +21,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshots.SnapshotStateMap
@@ -103,34 +101,20 @@ fun ControllerScreen(
     val density = LocalDensity.current.density
     val context = LocalContext.current
 
-    val gyroX = remember { mutableFloatStateOf(0f) }
-    val gyroY = remember { mutableFloatStateOf(0f) }
     val motionManager = remember { MotionSensorManager(context) }
     val vibrator = remember { obtainVibrator(context) }
 
+    // Gyro feeds the right stick's motion component directly from the sensor thread;
+    // setRightStickMotion is thread-safe (reportLock) and touch writes its own component.
     DisposableEffect(motionEnabled, motionSensitivity) {
         if (motionEnabled && motionManager.isSupported) {
-            motionManager.onMotion = { x, y ->
-                // Sensor fires on a background thread; marshal to main before touching Compose state.
-                mainHandler.post {
-                    gyroX.floatValue = x
-                    gyroY.floatValue = y
-                }
-            }
+            motionManager.onMotion = { x, y -> gamepad?.setRightStickMotion(x, y) }
             motionManager.start(motionSensitivity)
         }
         onDispose {
             motionManager.stop()
-            gyroX.floatValue = 0f
-            gyroY.floatValue = 0f
             gamepad?.setRightStickMotion(0f, 0f)
         }
-    }
-
-    // Gyro is the sole writer of the right stick's motion component; touch writes its touch component
-    // separately and the gamepad composes the two.
-    LaunchedEffect(gyroX.floatValue, gyroY.floatValue) {
-        if (motionEnabled) gamepad?.setRightStickMotion(gyroX.floatValue, gyroY.floatValue)
     }
 
     BoxWithConstraints(
