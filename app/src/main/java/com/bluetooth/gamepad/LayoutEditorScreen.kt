@@ -118,6 +118,7 @@ fun LayoutEditorScreen(
     val context = LocalContext.current
 
     fun pushUndo() {
+        if (undoStack.size >= 50) undoStack.removeAt(0)
         undoStack.add(buttons.toList())
         redoStack.clear()
         edited.value = true
@@ -133,6 +134,7 @@ fun LayoutEditorScreen(
 
     fun redo() {
         if (redoStack.isEmpty()) return
+        if (undoStack.size >= 50) undoStack.removeAt(0)
         undoStack.add(buttons.toList())
         val next = redoStack.removeAt(redoStack.lastIndex)
         buttons.clear()

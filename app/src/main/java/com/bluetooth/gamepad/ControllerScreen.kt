@@ -36,13 +36,8 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
-import android.content.Context
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.os.VibratorManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -95,7 +90,7 @@ fun ControllerScreen(
     layout: ControllerLayout = ControllerLayout.default(),
     hapticIntensity: HapticIntensity = HapticIntensity.MEDIUM,
     motionEnabled: Boolean = false,
-    motionSensitivity: MotionSensitivity = MotionSensitivity.MEDIUM,
+    motionSensitivity: Float = 90f,
     onStopClick: () -> Unit
 ) {
     val density = LocalDensity.current.density
@@ -585,17 +580,6 @@ enum class DpadDir { UP, DOWN, LEFT, RIGHT }
 
 data class DpadState(val h: DpadDir?, val v: DpadDir?)
 
-private fun obtainVibrator(context: Context): Vibrator =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
-            ?: @Suppress("DEPRECATION") (context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator)
-    } else {
-        @Suppress("DEPRECATION")
-        context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-    }
-
-private val mainHandler = Handler(Looper.getMainLooper())
-
 private fun vibrateForIntensity(vibrator: Vibrator, intensity: HapticIntensity) {
     if (intensity == HapticIntensity.OFF || !vibrator.hasVibrator()) return
     val ms = when (intensity) {
@@ -610,7 +594,5 @@ private fun vibrateForIntensity(vibrator: Vibrator, intensity: HapticIntensity) 
         HapticIntensity.STRONG -> 255
         HapticIntensity.OFF    -> return
     }
-    mainHandler.post {
-        vibrator.vibrate(VibrationEffect.createOneShot(ms, amplitude))
-    }
+    vibrator.vibrate(VibrationEffect.createOneShot(ms, amplitude))
 }

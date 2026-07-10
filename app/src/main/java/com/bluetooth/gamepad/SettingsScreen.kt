@@ -25,15 +25,12 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Phonelink
 import androidx.compose.material.icons.filled.SettingsBrightness
 import androidx.compose.material.icons.filled.SmartDisplay
-import android.content.Context
-import android.os.Build
-import android.os.Vibrator
-import android.os.VibratorManager
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,13 +56,13 @@ fun SettingsScreen(
     isWindowsMode: Boolean,
     hapticIntensity: HapticIntensity,
     motionEnabled: Boolean,
-    motionSensitivity: MotionSensitivity,
+    motionSensitivity: Float,
     autoReconnect: Boolean,
     onThemeChange: (AppTheme) -> Unit,
     onWindowsModeToggle: (Boolean) -> Unit,
     onHapticIntensityChange: (HapticIntensity) -> Unit,
     onMotionEnabledChange: (Boolean) -> Unit,
-    onMotionSensitivityChange: (MotionSensitivity) -> Unit,
+    onMotionSensitivityChange: (Float) -> Unit,
     onAutoReconnectChange: (Boolean) -> Unit,
     contentPadding: PaddingValues = PaddingValues()
 ) {
@@ -285,16 +282,7 @@ private fun HapticIntensityRow(
 ) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
-    val hasVibrator = remember {
-        val v = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            (context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
-                ?: @Suppress("DEPRECATION") (context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator)
-        } else {
-            @Suppress("DEPRECATION")
-            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        }
-        v.hasVibrator()
-    }
+    val hasVibrator = remember { obtainVibrator(context).hasVibrator() }
 
     val options = listOf(
         HapticIntensity.OFF    to "Off",
@@ -493,15 +481,15 @@ private fun Divider(color: Color) {
 @Composable
 private fun MotionSensitivityRow(
     enabled: Boolean,
-    sensitivity: MotionSensitivity,
-    onChange: (MotionSensitivity) -> Unit
+    sensitivity: Float,
+    onChange: (Float) -> Unit
 ) {
     val cs = MaterialTheme.colorScheme
-    val options = listOf(
-        MotionSensitivity.LOW    to "Low",
-        MotionSensitivity.MEDIUM to "Medium",
-        MotionSensitivity.HIGH   to "High",
-    )
+    // Sensitivity is deg/s for full stick deflection (30..180, lower = faster).
+    // Slider is inverted so dragging right feels faster.
+    val min = MotionSensorManager.SENS_MIN_DPS
+    val max = MotionSensorManager.SENS_MAX_DPS
+    val sliderValue = 1f - (sensitivity.coerceIn(min, max) - min) / (max - min)
 
     Column(
         modifier = Modifier
@@ -525,41 +513,24 @@ private fun MotionSensitivityRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text("Sensitivity", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
                 Text(
-                    if (enabled) "Gyroscope input scale" else "Enable motion controls first",
+                    if (enabled) "Full deflection at ${sensitivity.toInt()} deg/s" else "Enable motion controls first",
                     fontSize = 12.sp,
                     color = cs.onSurfaceVariant,
                     modifier = Modifier.padding(top = 1.dp)
                 )
             }
         }
-        Row(
+        Slider(
+            value = sliderValue,
+            onValueChange = { v -> onChange(max - v * (max - min)) },
+            enabled = enabled,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            options.forEach { (value, label) ->
-                val selected = sensitivity == value
-                androidx.compose.material3.Surface(
-                    onClick = { if (enabled) onChange(value) },
-                    enabled = enabled,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(36.dp),
-                    shape = RoundedCornerShape(999.dp),
-                    color = if (selected && enabled) cs.primary else cs.surfaceContainerHigh,
-                    border = if (selected && enabled) null else androidx.compose.foundation.BorderStroke(1.dp, cs.outlineVariant)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            label,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (selected && enabled) cs.onPrimary else cs.onSurface
-                        )
-                    }
-                }
-            }
+                .padding(top = 4.dp)
+        )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("Slow", fontSize = 10.sp, color = cs.onSurfaceVariant)
+            Text("Fast", fontSize = 10.sp, color = cs.onSurfaceVariant)
         }
     }
 }

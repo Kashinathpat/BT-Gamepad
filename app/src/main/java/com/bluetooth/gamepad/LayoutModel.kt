@@ -122,42 +122,27 @@ class LayoutRepository(private val prefs: SharedPreferences) {
     }
 
     fun load(id: String): ControllerLayout? {
-        if (id == ControllerLayout.DEFAULT_ID) {
-            val raw = prefs.getString("layout_${ControllerLayout.DEFAULT_ID}", null)
-                ?: return ControllerLayout.default()
-            return try {
-                val json = JSONObject(raw)
-                val arr = json.getJSONArray("buttons")
-                val btns = (0 until arr.length()).map { i ->
-                    val b = arr.getJSONObject(i)
-                    ButtonConfig(
-                        id       = b.getString("id"),
-                        label    = b.getString("label"),
-                        xFrac    = b.getDouble("x").toFloat(),
-                        yFrac    = b.getDouble("y").toFloat(),
-                        sizeFrac = b.getDouble("size").toFloat()
-                    )
-                }
-                ControllerLayout(ControllerLayout.DEFAULT_ID, json.getString("name"), btns)
-            } catch (_: Exception) { ControllerLayout.default() }
-        }
-        val raw = prefs.getString("layout_${id}", null) ?: return null
-        return try {
-            val json = JSONObject(raw)
-            val arr = json.getJSONArray("buttons")
-            val buttons = (0 until arr.length()).map { i ->
-                val b = arr.getJSONObject(i)
-                ButtonConfig(
-                    id      = b.getString("id"),
-                    label   = b.getString("label"),
-                    xFrac   = b.getDouble("x").toFloat(),
-                    yFrac   = b.getDouble("y").toFloat(),
-                    sizeFrac = b.getDouble("size").toFloat()
-                )
-            }
-            ControllerLayout(json.getString("id"), json.getString("name"), buttons)
-        } catch (_: Exception) { null }
+        val raw = prefs.getString("layout_${id}", null)
+        val parsed = raw?.let { parseLayout(it, id) }
+        // The default layout always resolves to something usable.
+        return parsed ?: if (id == ControllerLayout.DEFAULT_ID) ControllerLayout.default() else null
     }
+
+    private fun parseLayout(raw: String, id: String): ControllerLayout? = try {
+        val json = JSONObject(raw)
+        val arr = json.getJSONArray("buttons")
+        val buttons = (0 until arr.length()).map { i ->
+            val b = arr.getJSONObject(i)
+            ButtonConfig(
+                id       = b.getString("id"),
+                label    = b.getString("label"),
+                xFrac    = b.getDouble("x").toFloat(),
+                yFrac    = b.getDouble("y").toFloat(),
+                sizeFrac = b.getDouble("size").toFloat()
+            )
+        }
+        ControllerLayout(id, json.getString("name"), buttons)
+    } catch (_: Exception) { null }
 
     fun newCustom(name: String): ControllerLayout {
         return ControllerLayout(

@@ -57,7 +57,8 @@ class MainActivity : ComponentActivity() {
     private val appTheme = mutableStateOf(AppTheme.SYSTEM)
     private val hapticIntensity = mutableStateOf(HapticIntensity.MEDIUM)
     private val motionEnabled = mutableStateOf(false)
-    private val motionSensitivity = mutableStateOf(MotionSensitivity.MEDIUM)
+    // Gyro sensitivity: degrees/second of rotation for full stick deflection (lower = faster).
+    private val motionSensitivity = mutableStateOf(90f)
     private val currentTab = mutableStateOf(NavTab.CONNECT)
     private val activeLayoutId = mutableStateOf(ControllerLayout.DEFAULT_ID)
     private val editingLayout = mutableStateOf<ControllerLayout?>(null)
@@ -122,11 +123,7 @@ class MainActivity : ComponentActivity() {
             else     -> HapticIntensity.MEDIUM
         }
         motionEnabled.value = prefs.getBoolean("motionEnabled", false)
-        motionSensitivity.value = when (prefs.getString("motionSensitivity", "MEDIUM")) {
-            "LOW"  -> MotionSensitivity.LOW
-            "HIGH" -> MotionSensitivity.HIGH
-            else   -> MotionSensitivity.MEDIUM
-        }
+        motionSensitivity.value = prefs.getFloat("motionSensDps", 90f)
         autoReconnect.value = prefs.getBoolean("autoReconnect", true)
 
         // Bond state changes are sent by the Bluetooth system — must be EXPORTED
@@ -291,7 +288,7 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onMotionSensitivityChange = { value ->
                                         motionSensitivity.value = value
-                                        prefs.edit().putString("motionSensitivity", value.name).apply()
+                                        prefs.edit().putFloat("motionSensDps", value).apply()
                                     },
                                     onAutoReconnectChange = { value ->
                                         autoReconnect.value = value
@@ -364,10 +361,13 @@ class MainActivity : ComponentActivity() {
                                 prefs.edit().putString("lastDeviceAddress", gp.connectedDevice?.address).apply()
                                 Toast.makeText(this, "Connected to ${gp.connectedDeviceName}", Toast.LENGTH_SHORT).show()
                                 // Protect the live HID session from background termination. Started
-                                // per-connection (not once at init) so reconnections are covered too.
-                                startForegroundService(Intent(this, GamepadForegroundService::class.java).apply {
-                                    action = GamepadForegroundService.ACTION_START
-                                })
+                                // per-connection so reconnections are covered. Can throw on API 31+
+                                // if the connect lands while backgrounded, so guard it.
+                                try {
+                                    startForegroundService(Intent(this, GamepadForegroundService::class.java).apply {
+                                        action = GamepadForegroundService.ACTION_START
+                                    })
+                                } catch (_: Exception) { }
                             }
                             BluetoothProfile.STATE_DISCONNECTED -> {
                                 stopService(Intent(this, GamepadForegroundService::class.java))
@@ -393,6 +393,18 @@ class MainActivity : ComponentActivity() {
             }
         }
         ownDeviceName.value = gamepad?.ownDeviceName ?: ""
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // A connect that landed while backgrounded may have had its service start rejected.
+        if (gamepad?.isConnected == true) {
+            try {
+                startForegroundService(Intent(this, GamepadForegroundService::class.java).apply {
+                    action = GamepadForegroundService.ACTION_START
+                })
+            } catch (_: Exception) { }
+        }
     }
 
     private fun stopGamepad() {

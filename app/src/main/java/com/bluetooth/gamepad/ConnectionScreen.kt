@@ -92,12 +92,10 @@ fun ConnectionScreen(
     val devices = remember { mutableStateListOf<BluetoothDevice>() }
     val showUnpairConfirm = remember { mutableStateOf<BluetoothDevice?>(null) }
     val connectingAddress = remember { mutableStateOf<String?>(null) }
-    val isConnectedRef = remember { mutableStateOf(hidConnectionState == BluetoothProfile.STATE_CONNECTED) }
 
     val isDiscovering = remember { mutableStateOf(false) }
 
     LaunchedEffect(hidConnectionState) {
-        isConnectedRef.value = hidConnectionState == BluetoothProfile.STATE_CONNECTED
         if (hidConnectionState == BluetoothProfile.STATE_CONNECTED ||
             hidConnectionState == BluetoothProfile.STATE_DISCONNECTED
         ) {
@@ -153,7 +151,8 @@ fun ConnectionScreen(
             context, receiver, filter,
             androidx.core.content.ContextCompat.RECEIVER_EXPORTED
         )
-        activity.startDiscovery()
+        // Inquiry scans degrade a live HID link, so never auto-scan while connected.
+        if (hidConnectionState != BluetoothProfile.STATE_CONNECTED) activity.startDiscovery()
         onDispose {
             activity.cancelDiscovery()
             try { context.unregisterReceiver(receiver) } catch (_: Exception) { }
@@ -352,7 +351,7 @@ fun ConnectionScreen(
                         }
                         if (isDiscovering.value) {
                             ScanningIndicator(cs.primary)
-                        } else {
+                        } else if (!isConnected) {
                             TextButton(
                                 onClick = { activity.startDiscovery() }
                             ) {

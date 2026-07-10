@@ -16,8 +16,6 @@ import kotlin.math.sign
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-enum class MotionSensitivity { LOW, MEDIUM, HIGH }
-
 /**
  * Gyro-to-stick: rotation accumulates into a held stick position (like PUBG Mobile's gyro aim),
  * and recenters only while the phone is held still. Unlike a pure rate mapping, a slow deliberate
@@ -58,7 +56,11 @@ class MotionSensorManager(private val context: Context) {
         private const val ACCEL_TRUST = 0.02f
         private const val YAW_RELAX = 1.41f
         private const val INTEGRATE_HALFLIFE_S = 0.15f
+        // Full-rate rotation reaches full deflection in 1/INTEGRATION_GAIN seconds.
+        private const val INTEGRATION_GAIN = 3f
         private const val SENSOR_PERIOD_US = 5000
+        const val SENS_MIN_DPS = 30f
+        const val SENS_MAX_DPS = 180f
     }
 
     private val listener = object : SensorEventListener {
@@ -113,8 +115,8 @@ class MotionSensorManager(private val context: Context) {
         val pitchRate = cgx
 
         val maxRad = (degPerSecForMax * PI / 180.0).toFloat()
-        posX = (posX + yawRate / maxRad * dt * 3f).coerceIn(-1f, 1f)
-        posY = (posY + pitchRate / maxRad * dt * 3f).coerceIn(-1f, 1f)
+        posX = (posX + yawRate / maxRad * dt * INTEGRATION_GAIN).coerceIn(-1f, 1f)
+        posY = (posY + pitchRate / maxRad * dt * INTEGRATION_GAIN).coerceIn(-1f, 1f)
 
         // Recenter only while the phone is held still, so a slow deliberate turn holds its
         // deflection instead of springing back the instant rotation slows down.
@@ -164,14 +166,11 @@ class MotionSensorManager(private val context: Context) {
         if (gl > 1e-6f) { gravX /= gl; gravY /= gl; gravZ /= gl }
     }
 
-    fun start(sensitivity: MotionSensitivity) {
+    /** sensitivityDps: degrees/second of rotation that yields full stick deflection. */
+    fun start(sensitivityDps: Float) {
         if (gyroSensor == null) return
         reset()
-        degPerSecForMax = when (sensitivity) {
-            MotionSensitivity.LOW    -> 150f
-            MotionSensitivity.MEDIUM -> 90f
-            MotionSensitivity.HIGH   -> 45f
-        }
+        degPerSecForMax = sensitivityDps.coerceIn(SENS_MIN_DPS, SENS_MAX_DPS)
         val thread = HandlerThread("gyro-aim").apply { start() }
         sensorThread = thread
         val handler = Handler(thread.looper)
