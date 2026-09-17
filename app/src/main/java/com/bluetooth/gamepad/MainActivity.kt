@@ -23,6 +23,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Settings
@@ -34,6 +37,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
@@ -57,8 +61,11 @@ class MainActivity : ComponentActivity() {
     private val appTheme = mutableStateOf(AppTheme.SYSTEM)
     private val hapticIntensity = mutableStateOf(HapticIntensity.MEDIUM)
     private val motionEnabled = mutableStateOf(false)
+    private val motionMode = mutableStateOf(MotionMode.AIM)
     // Gyro sensitivity: degrees/second of rotation for full stick deflection (lower = faster).
     private val motionSensitivity = mutableStateOf(90f)
+    private val motionInvertX = mutableStateOf(false)
+    private val motionInvertY = mutableStateOf(false)
     private val currentTab = mutableStateOf(NavTab.CONNECT)
     private val activeLayoutId = mutableStateOf(ControllerLayout.DEFAULT_ID)
     private val editingLayout = mutableStateOf<ControllerLayout?>(null)
@@ -123,7 +130,11 @@ class MainActivity : ComponentActivity() {
             else     -> HapticIntensity.MEDIUM
         }
         motionEnabled.value = prefs.getBoolean("motionEnabled", false)
+        motionMode.value = if (prefs.getString("motionMode", "AIM") == "STEERING")
+            MotionMode.STEERING else MotionMode.AIM
         motionSensitivity.value = prefs.getFloat("motionSensDps", 90f)
+        motionInvertX.value = prefs.getBoolean("motionInvertX", false)
+        motionInvertY.value = prefs.getBoolean("motionInvertY", false)
         autoReconnect.value = prefs.getBoolean("autoReconnect", true)
 
         // Bond state changes are sent by the Bluetooth system — must be EXPORTED
@@ -171,7 +182,10 @@ class MainActivity : ComponentActivity() {
                             ?: ControllerLayout.default(),
                         hapticIntensity = hapticIntensity.value,
                         motionEnabled = motionEnabled.value,
+                        motionMode = motionMode.value,
                         motionSensitivity = motionSensitivity.value,
+                        motionInvertX = motionInvertX.value,
+                        motionInvertY = motionInvertY.value,
                         onStopClick = closeController
                     )
                 } else if (editingLayout.value != null && editorSession.value != null) {
@@ -218,84 +232,102 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         ) { innerPadding ->
-                            when (currentTab.value) {
-                                NavTab.CONNECT -> ConnectionScreen(
-                                    activity = this@MainActivity,
-                                    hidProfileConnected = hidProfileConnected.value,
-                                    hidAppRegistered = hidAppRegistered.value,
-                                    hidConnectionState = hidConnectionState.value,
-                                    connectedDeviceName = connectedDeviceName.value,
-                                    ownDeviceName = ownDeviceName.value,
-                                    onStartClick = { requestPermissionsAndInit() },
-                                    onPairDevice = { device -> pairDevice(device) },
-                                    onUnpairDevice = { device -> unpairDevice(device) },
-                                    connectedDeviceAddress = gamepad?.connectedDevice?.address ?: "",
-                                    connectedDevice = gamepad?.connectedDevice,
-                                    activeDInputMode = gamepad?.isWindowsDInputMode ?: false,
-                                    onConnectDevice = { device -> gamepad?.connectDevice(device) },
-                                    onCancelConnect = { device ->
-                                        userCancelledConnect = true
-                                        gamepad?.cancelConnect(device)
-                                    },
-                                    onDisconnectDevice = { device ->
-                                        userCancelledConnect = true
-                                        gamepad?.cancelConnect(device)
-                                    },
-                                    contentPadding = innerPadding
-                                )
-                                NavTab.LAYOUTS -> androidx.compose.runtime.key(layoutsRefreshKey.value) {
-                                    LayoutsScreen(
-                                        repo = layoutRepo,
+                            // Each tab has its own Scaffold; consume the bottom inset so it is not applied twice.
+                            Box(Modifier.consumeWindowInsets(PaddingValues(bottom = innerPadding.calculateBottomPadding()))) {
+                                when (currentTab.value) {
+                                    NavTab.CONNECT -> ConnectionScreen(
+                                        activity = this@MainActivity,
+                                        hidProfileConnected = hidProfileConnected.value,
+                                        hidAppRegistered = hidAppRegistered.value,
+                                        hidConnectionState = hidConnectionState.value,
                                         connectedDeviceName = connectedDeviceName.value,
-                                        onStart = { layout ->
-                                            activeLayoutId.value = layout.id
-                                            prefs.edit().putString("activeLayoutId", layout.id).apply()
-                                            previewLayout.value = null
-                                            controllerVisible.value = true
+                                        ownDeviceName = ownDeviceName.value,
+                                        onStartClick = { requestPermissionsAndInit() },
+                                        onPairDevice = { device -> pairDevice(device) },
+                                        onUnpairDevice = { device -> unpairDevice(device) },
+                                        connectedDeviceAddress = gamepad?.connectedDevice?.address ?: "",
+                                        connectedDevice = gamepad?.connectedDevice,
+                                        activeDInputMode = gamepad?.isWindowsDInputMode ?: false,
+                                        onConnectDevice = { device -> gamepad?.connectDevice(device) },
+                                        onCancelConnect = { device ->
+                                            userCancelledConnect = true
+                                            gamepad?.cancelConnect(device)
                                         },
-                                        onEdit = { layout ->
-                                            // Fresh working session for this edit; discarded on exit.
-                                            editorSession.value = EditorSession(layout)
-                                            editingLayout.value = layout
+                                        onDisconnectDevice = { device ->
+                                            userCancelledConnect = true
+                                            gamepad?.cancelConnect(device)
+                                        },
+                                        contentPadding = innerPadding
+                                    )
+                                    NavTab.LAYOUTS -> androidx.compose.runtime.key(layoutsRefreshKey.value) {
+                                        LayoutsScreen(
+                                            repo = layoutRepo,
+                                            connectedDeviceName = connectedDeviceName.value,
+                                            onStart = { layout ->
+                                                activeLayoutId.value = layout.id
+                                                prefs.edit().putString("activeLayoutId", layout.id).apply()
+                                                previewLayout.value = null
+                                                controllerVisible.value = true
+                                            },
+                                            onEdit = { layout ->
+                                                // Fresh working session for this edit; discarded on exit.
+                                                editorSession.value = EditorSession(layout)
+                                                editingLayout.value = layout
+                                            },
+                                            contentPadding = innerPadding
+                                        )
+                                    }
+                                    NavTab.SETTINGS -> SettingsScreen(
+                                        appTheme = appTheme.value,
+                                        appVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: "",
+                                        isWindowsMode = isWindowsMode.value,
+                                        hapticIntensity = hapticIntensity.value,
+                                        motionEnabled = motionEnabled.value,
+                                        motionMode = motionMode.value,
+                                        motionSensitivity = motionSensitivity.value,
+                                                    motionInvertX = motionInvertX.value,
+                                        motionInvertY = motionInvertY.value,
+                                        autoReconnect = autoReconnect.value,
+                                        onThemeChange = { theme ->
+                                            appTheme.value = theme
+                                            prefs.edit().putString("appTheme", theme.name).apply()
+                                        },
+                                        onWindowsModeToggle = { value ->
+                                            isWindowsMode.value = value
+                                            prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
+                                            gamepad?.switchMode(value)
+                                        },
+                                        onHapticIntensityChange = { value ->
+                                            hapticIntensity.value = value
+                                            prefs.edit().putString("hapticIntensity", value.name).apply()
+                                        },
+                                        onMotionEnabledChange = { value ->
+                                            motionEnabled.value = value
+                                            prefs.edit().putBoolean("motionEnabled", value).apply()
+                                        },
+                                        onMotionModeChange = { value ->
+                                            motionMode.value = value
+                                            prefs.edit().putString("motionMode", value.name).apply()
+                                        },
+                                        onMotionSensitivityChange = { value ->
+                                            motionSensitivity.value = value
+                                            prefs.edit().putFloat("motionSensDps", value).apply()
+                                        },
+                                        onMotionInvertXChange = { value ->
+                                            motionInvertX.value = value
+                                            prefs.edit().putBoolean("motionInvertX", value).apply()
+                                        },
+                                        onMotionInvertYChange = { value ->
+                                            motionInvertY.value = value
+                                            prefs.edit().putBoolean("motionInvertY", value).apply()
+                                        },
+                                        onAutoReconnectChange = { value ->
+                                            autoReconnect.value = value
+                                            prefs.edit().putBoolean("autoReconnect", value).apply()
                                         },
                                         contentPadding = innerPadding
                                     )
                                 }
-                                NavTab.SETTINGS -> SettingsScreen(
-                                    appTheme = appTheme.value,
-                                    appVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: "",
-                                    isWindowsMode = isWindowsMode.value,
-                                    hapticIntensity = hapticIntensity.value,
-                                    motionEnabled = motionEnabled.value,
-                                    motionSensitivity = motionSensitivity.value,
-                                    autoReconnect = autoReconnect.value,
-                                    onThemeChange = { theme ->
-                                        appTheme.value = theme
-                                        prefs.edit().putString("appTheme", theme.name).apply()
-                                    },
-                                    onWindowsModeToggle = { value ->
-                                        isWindowsMode.value = value
-                                        prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
-                                        gamepad?.switchMode(value)
-                                    },
-                                    onHapticIntensityChange = { value ->
-                                        hapticIntensity.value = value
-                                        prefs.edit().putString("hapticIntensity", value.name).apply()
-                                    },
-                                    onMotionEnabledChange = { value ->
-                                        motionEnabled.value = value
-                                        prefs.edit().putBoolean("motionEnabled", value).apply()
-                                    },
-                                    onMotionSensitivityChange = { value ->
-                                        motionSensitivity.value = value
-                                        prefs.edit().putFloat("motionSensDps", value).apply()
-                                    },
-                                    onAutoReconnectChange = { value ->
-                                        autoReconnect.value = value
-                                        prefs.edit().putBoolean("autoReconnect", value).apply()
-                                    },
-                                    contentPadding = innerPadding
-                                )
                             }
                         }
                 }

@@ -23,8 +23,11 @@ import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Phonelink
+import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.SettingsBrightness
 import androidx.compose.material.icons.filled.SmartDisplay
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material3.Icon
@@ -56,13 +59,19 @@ fun SettingsScreen(
     isWindowsMode: Boolean,
     hapticIntensity: HapticIntensity,
     motionEnabled: Boolean,
+    motionMode: MotionMode,
     motionSensitivity: Float,
+    motionInvertX: Boolean,
+    motionInvertY: Boolean,
     autoReconnect: Boolean,
     onThemeChange: (AppTheme) -> Unit,
     onWindowsModeToggle: (Boolean) -> Unit,
     onHapticIntensityChange: (HapticIntensity) -> Unit,
     onMotionEnabledChange: (Boolean) -> Unit,
+    onMotionModeChange: (MotionMode) -> Unit,
     onMotionSensitivityChange: (Float) -> Unit,
+    onMotionInvertXChange: (Boolean) -> Unit,
+    onMotionInvertYChange: (Boolean) -> Unit,
     onAutoReconnectChange: (Boolean) -> Unit,
     contentPadding: PaddingValues = PaddingValues()
 ) {
@@ -208,12 +217,42 @@ fun SettingsScreen(
                     checked = motionEnabled,
                     onCheckedChange = onMotionEnabledChange
                 )
-                Divider(cs.outlineVariant)
-                MotionSensitivityRow(
-                    enabled = motionEnabled,
-                    sensitivity = motionSensitivity,
-                    onChange = onMotionSensitivityChange
-                )
+                if (motionEnabled) {
+                    Divider(cs.outlineVariant)
+                    MotionModeRow(
+                        mode = motionMode,
+                        onChange = onMotionModeChange
+                    )
+                    Divider(cs.outlineVariant)
+                    MotionSensitivityRow(
+                        mode = motionMode,
+                        sensitivity = motionSensitivity,
+                        onChange = onMotionSensitivityChange
+                    )
+                    Divider(cs.outlineVariant)
+                    SettingsRowToggle(
+                        icon = Icons.Default.SwapHoriz,
+                        iconBg = cs.tertiaryContainer,
+                        iconFg = cs.onTertiaryContainer,
+                        title = "Invert X",
+                        sub = "Flip horizontal motion",
+                        checked = motionInvertX,
+                        onCheckedChange = onMotionInvertXChange
+                    )
+                    // Vertical inversion is meaningless for steering, which only drives the X axis.
+                    if (motionMode == MotionMode.AIM) {
+                        Divider(cs.outlineVariant)
+                        SettingsRowToggle(
+                            icon = Icons.Default.SwapVert,
+                            iconBg = cs.tertiaryContainer,
+                            iconFg = cs.onTertiaryContainer,
+                            title = "Invert Y",
+                            sub = "Flip vertical motion",
+                            checked = motionInvertY,
+                            onCheckedChange = onMotionInvertYChange
+                        )
+                    }
+                }
             }
 
             Spacer(Modifier.height(24.dp))
@@ -401,12 +440,14 @@ private fun SettingsRowToggle(
     title: String,
     sub: String?,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true
 ) {
     val cs = MaterialTheme.colorScheme
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.4f)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -425,7 +466,7 @@ private fun SettingsRowToggle(
                 Text(sub, fontSize = 12.sp, color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 1.dp))
             }
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }
 
@@ -480,7 +521,7 @@ private fun Divider(color: Color) {
 
 @Composable
 private fun MotionSensitivityRow(
-    enabled: Boolean,
+    mode: MotionMode,
     sensitivity: Float,
     onChange: (Float) -> Unit
 ) {
@@ -494,7 +535,6 @@ private fun MotionSensitivityRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .alpha(if (enabled) 1f else 0.4f)
             .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
         Row(
@@ -513,7 +553,10 @@ private fun MotionSensitivityRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text("Sensitivity", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
                 Text(
-                    if (enabled) "Full deflection at ${sensitivity.toInt()} deg/s" else "Enable motion controls first",
+                    when {
+                        mode == MotionMode.STEERING -> "Full lock at ${(32f * sensitivity / 90f).toInt()} deg tilt"
+                        else -> "Full deflection at ${sensitivity.toInt()} deg/s"
+                    },
                     fontSize = 12.sp,
                     color = cs.onSurfaceVariant,
                     modifier = Modifier.padding(top = 1.dp)
@@ -523,14 +566,90 @@ private fun MotionSensitivityRow(
         Slider(
             value = sliderValue,
             onValueChange = { v -> onChange(max - v * (max - min)) },
-            enabled = enabled,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 4.dp)
         )
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Slow", fontSize = 10.sp, color = cs.onSurfaceVariant)
-            Text("Fast", fontSize = 10.sp, color = cs.onSurfaceVariant)
+            Text("Low", fontSize = 10.sp, color = cs.onSurfaceVariant)
+            Text("High", fontSize = 10.sp, color = cs.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun MotionModeRow(
+    mode: MotionMode,
+    onChange: (MotionMode) -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    val manager = remember { MotionSensorManager(context) }
+
+    val options = listOf(
+        MotionMode.AIM to "Aim",
+        MotionMode.STEERING to "Steering",
+    )
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(cs.tertiaryContainer, RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.ScreenRotation, contentDescription = null, tint = cs.onTertiaryContainer, modifier = Modifier.size(20.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Motion mode", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
+                Text(
+                    if (mode == MotionMode.STEERING) "Tilt the phone like a wheel"
+                    else "Turn the phone to aim",
+                    fontSize = 12.sp,
+                    color = cs.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 1.dp)
+                )
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            options.forEach { (value, label) ->
+                // Each mode rides a different sensor, so one can be missing while the other works.
+                val available = manager.isModeAvailable(value)
+                val selected = mode == value
+                androidx.compose.material3.Surface(
+                    onClick = { if (available) onChange(value) },
+                    enabled = available,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp),
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (selected && available) cs.primary else cs.surfaceContainerHigh,
+                    border = if (selected && available) null else androidx.compose.foundation.BorderStroke(1.dp, cs.outlineVariant)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            if (available) label else "$label (n/a)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (selected && available) cs.onPrimary else cs.onSurface
+                        )
+                    }
+                }
+            }
         }
     }
 }

@@ -16,11 +16,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
@@ -90,7 +92,10 @@ fun ControllerScreen(
     layout: ControllerLayout = ControllerLayout.default(),
     hapticIntensity: HapticIntensity = HapticIntensity.MEDIUM,
     motionEnabled: Boolean = false,
+    motionMode: MotionMode = MotionMode.AIM,
     motionSensitivity: Float = 90f,
+    motionInvertX: Boolean = false,
+    motionInvertY: Boolean = false,
     onStopClick: () -> Unit
 ) {
     val density = LocalDensity.current.density
@@ -99,17 +104,21 @@ fun ControllerScreen(
     val motionManager = remember { MotionSensorManager(context) }
     val vibrator = remember { obtainVibrator(context) }
 
-    // Gyro feeds the right stick's motion component directly from the sensor thread;
-    // setRightStickMotion is thread-safe (reportLock) and touch writes its own component.
-    DisposableEffect(motionEnabled, motionSensitivity) {
-        if (motionEnabled && motionManager.isSupported) {
+    // Keyed only on what changes the registered sensor; tunables go through updateTuning below so
+    // a slider drag does not restart the sensor thread and rerun bias calibration.
+    DisposableEffect(motionEnabled, motionMode) {
+        if (motionEnabled && motionManager.isModeAvailable(motionMode)) {
             motionManager.onMotion = { x, y -> gamepad?.setRightStickMotion(x, y) }
-            motionManager.start(motionSensitivity)
+            motionManager.start(motionMode, motionSensitivity, motionInvertX, motionInvertY)
         }
         onDispose {
             motionManager.stop()
             gamepad?.setRightStickMotion(0f, 0f)
         }
+    }
+
+    LaunchedEffect(motionSensitivity, motionInvertX, motionInvertY) {
+        motionManager.updateTuning(motionSensitivity, motionInvertX, motionInvertY)
     }
 
     BoxWithConstraints(
@@ -236,6 +245,17 @@ fun ControllerScreen(
         ) {
             IconButton(onClick = onStopClick, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = ControllerOnBtn)
+            }
+            if (motionEnabled && motionManager.isModeAvailable(motionMode)) {
+                IconButton(
+                    onClick = {
+                        motionManager.recenter()
+                        gamepad?.setRightStickMotion(0f, 0f)
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.Default.CenterFocusStrong, contentDescription = "Recenter motion", tint = ControllerOnBtn)
+                }
             }
             if (connectedDeviceName.isNotEmpty()) {
                 Text(text = connectedDeviceName, fontSize = 11.sp, color = StatusConnected)
