@@ -57,7 +57,7 @@ class BluetoothHidGamepad(context: Context) {
 
         // HID descriptor: 12 buttons + hat switch (4 bits) + 4 axes (-127..127)
         // Report layout (6 bytes): [btn0-7][btn8-11(lo4)+hat(hi4)][lx][ly][rx][ry]
-        private val DESCRIPTOR_HID = byteArrayOf(`
+        private val DESCRIPTOR_HID = byteArrayOf(
             0x05, 0x01,                     // Usage Page (Generic Desktop)
             0x09, 0x05,                     // Usage (Game Pad)
             0xA1.toByte(), 0x01,            // Collection (Application)
