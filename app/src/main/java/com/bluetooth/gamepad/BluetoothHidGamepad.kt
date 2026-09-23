@@ -11,9 +11,15 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.widget.Toast
-import java.util.concurrent.Executors
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 class BluetoothHidGamepad(context: Context) {
 
@@ -28,6 +34,14 @@ class BluetoothHidGamepad(context: Context) {
         // Fast back-to-back reports (like a quick tap's down then up) can overflow the BT buffer.
         private const val SEND_RETRY_LIMIT = 20
         private const val SEND_RETRY_DELAY_MS = 2L
+        private const val REGISTER_RETRY_LIMIT = 20
+        private const val REGISTER_RETRY_DELAY_MS = 300L
+        private const val STOP_DISCONNECT_TIMEOUT_MS = 3000L
+
+        // Instance the foreground service can stop when the task is removed.
+        @Volatile
+        var current: BluetoothHidGamepad? = null
+            private set
 
         // DInput descriptor: 16 flat buttons + 4 axes (-127..127)
         private val DESCRIPTOR_DINPUT = byteArrayOf(
@@ -139,8 +153,12 @@ class BluetoothHidGamepad(context: Context) {
             if (intent.action != BluetoothAdapter.ACTION_STATE_CHANGED) return
             val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
             if (state == BluetoothAdapter.STATE_TURNING_OFF || state == BluetoothAdapter.STATE_OFF) {
+                // Each getProfileProxy adds a connector; leaking one double-delivers onServiceConnected.
+                hidDevice?.let { bluetoothAdapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, it) }
                 hidDevice = null
                 connectedDevice = null
+                activeDevice = null
+                registerAttempts.set(0)
                 isConnected = false
                 isAppRegistered = false
                 connectionState = BluetoothProfile.STATE_DISCONNECTED
@@ -187,44 +205,62 @@ class BluetoothHidGamepad(context: Context) {
     // snapshot at enqueue time rather than letting one in-flight task re-read the latest report.
     private var lastEnqueued: ByteArray? = null
 
-    private var hidExecutor = Executors.newSingleThreadExecutor()
+    // Callbacks must not share the send executor: a retry backlog would delay the disconnect callback.
+    private val callbackExecutor: ExecutorService = newExecutor()
+    private var sendExecutor: ExecutorService = newExecutor()
+
+    // Makes queued sends abandon instead of burning 40 ms of retries each while the link goes down.
+    @Volatile
+    private var sendsSuppressed = false
 
     var onStatusChanged: (() -> Unit)? = null
 
-    @Volatile
-    private var pendingReRegister = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val registerAttempts = AtomicInteger(0)
 
     // Device queued while HID profile/app is still initialising — connected automatically once ready
     @Volatile
     private var pendingConnectDevice: BluetoothDevice? = null
 
+    @Volatile
+    private var pendingModeSwitch = false
+
+    // Device in any non-DISCONNECTED state (connectedDevice is only set once CONNECTED).
+    @Volatile
+    private var activeDevice: BluetoothDevice? = null
+
+    @Volatile
+    private var stopCompletion: (() -> Unit)? = null
+
+    @Volatile
+    private var stopping = false
+
     private val hidCallback = object : BluetoothHidDevice.Callback() {
         override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
             isAppRegistered = registered
             Log.d(TAG, "onAppStatusChanged registered=$registered device=${pluggedDevice?.address}")
-            if (!registered && pendingReRegister) {
-                pendingReRegister = false
-                registerApp()
-            } else {
-                onStatusChanged?.invoke()
-                if (registered) {
-                    pendingConnectDevice?.let { device ->
-                        pendingConnectDevice = null
-                        try {
-                            hidDevice?.connect(device)
-                        } catch (e: SecurityException) {
-                            Log.e(TAG, "SecurityException connecting pending device", e)
-                        }
-                    }
+            if (registered) registerAttempts.set(0)
+            onStatusChanged?.invoke()
+            // hidDevice is only null after stop(), so any other unregister is the stack's doing.
+            if (!registered && hidDevice != null && !stopping) {
+                scheduleRegister()
+                return
+            }
+            if (registered) {
+                pendingConnectDevice?.let { device ->
+                    pendingConnectDevice = null
+                    beginConnect(device)
                 }
             }
         }
 
         override fun onConnectionStateChanged(device: BluetoothDevice?, state: Int) {
             connectionState = state
+            activeDevice = if (state == BluetoothProfile.STATE_DISCONNECTED) null else device
             if (state == BluetoothProfile.STATE_CONNECTED) {
                 connectedDevice = device
                 isConnected = true
+                sendsSuppressed = false
                 connectedDeviceName = try {
                     device?.name ?: device?.address ?: "Unknown"
                 } catch (_: SecurityException) {
@@ -239,6 +275,14 @@ class BluetoothHidGamepad(context: Context) {
                 connectedDevice = null
                 isConnected = false
                 connectedDeviceName = ""
+                if (stopCompletion != null) {
+                    mainHandler.post { finishStop() }
+                    return
+                }
+                if (pendingModeSwitch) {
+                    pendingModeSwitch = false
+                    hidDevice?.let { hid -> mainHandler.post { reRegister(hid) } }
+                }
             }
             Log.d(TAG, "onConnectionStateChanged state=$state device=${device?.address}")
             onStatusChanged?.invoke()
@@ -247,17 +291,24 @@ class BluetoothHidGamepad(context: Context) {
 
     private val profileListener = object : BluetoothProfile.ServiceListener {
         override fun onServiceConnected(profile: Int, proxy: BluetoothProfile?) {
-            if (profile == BluetoothProfile.HID_DEVICE) {
-                hidDevice = proxy as BluetoothHidDevice
-                Log.d(TAG, "HID profile service connected")
-                onStatusChanged?.invoke()
-                registerApp()
+            if (profile != BluetoothProfile.HID_DEVICE) return
+            if (stopping) {
+                bluetoothAdapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, proxy)
+                return
             }
+            hidDevice = proxy as BluetoothHidDevice
+            registerAttempts.set(0)
+            Log.d(TAG, "HID profile service connected")
+            onStatusChanged?.invoke()
+            registerApp()
         }
 
         override fun onServiceDisconnected(profile: Int) {
             if (profile == BluetoothProfile.HID_DEVICE) {
                 hidDevice = null
+                connectedDevice = null
+                activeDevice = null
+                connectedDeviceName = ""
                 isAppRegistered = false
                 isConnected = false
                 connectionState = BluetoothProfile.STATE_DISCONNECTED
@@ -268,7 +319,11 @@ class BluetoothHidGamepad(context: Context) {
     }
 
     fun start(): Boolean {
-        if (hidExecutor.isShutdown) hidExecutor = Executors.newSingleThreadExecutor()
+        if (sendExecutor.isShutdown) sendExecutor = newExecutor()
+        current = this
+        stopping = false
+        sendsSuppressed = false
+        registerAttempts.set(0)
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         bluetoothAdapter = manager?.adapter ?: return false
         ownDeviceName = try {
@@ -303,17 +358,65 @@ class BluetoothHidGamepad(context: Context) {
         isWindowsDInputMode = windowsDInput
         synchronized(reportLock) { resetReport() }
         val hid = hidDevice ?: return
-        pendingReRegister = true
-        try {
-            hid.unregisterApp()
+        // Unregistering while a host is connected leaves the stack stuck in DISCONNECTING.
+        if (connectionState != BluetoothProfile.STATE_DISCONNECTED) {
+            pendingModeSwitch = true
+            disconnectActive()
+            mainHandler.postDelayed({ resolvePendingModeSwitch() }, STOP_DISCONNECT_TIMEOUT_MS)
+            return
+        }
+        reRegister(hid)
+    }
+
+    // The disconnect may never land, so re-register only once the link is really down.
+    private fun resolvePendingModeSwitch() {
+        if (!pendingModeSwitch) return
+        val hid = hidDevice ?: return
+        if (connectionState != BluetoothProfile.STATE_DISCONNECTED && activeDevice != null) return
+        pendingModeSwitch = false
+        reRegister(hid)
+    }
+
+    private fun disconnectActive(): Boolean {
+        sendsSuppressed = true
+        val hid = hidDevice ?: return false
+        val device = activeDevice ?: return false
+        return try {
+            hid.disconnect(device)
         } catch (e: SecurityException) {
-            Log.e(TAG, "SecurityException unregisterApp in switchMode", e)
-            pendingReRegister = false
-            registerApp()
+            Log.e(TAG, "SecurityException disconnect", e)
+            false
         }
     }
 
+    private fun reRegister(hid: BluetoothHidDevice) {
+        if (stopping) return
+        registerAttempts.set(0)
+        try {
+            hid.unregisterApp()
+        } catch (e: SecurityException) {
+            Log.e(TAG, "SecurityException unregisterApp", e)
+            registerApp()
+            return
+        }
+        // With nothing registered the stack sends no registered=false, so register on a delay.
+        if (!isAppRegistered) scheduleRegister()
+    }
+
+    // Accepted-then-dropped registers must count too, or that pair loops forever with no delay.
+    private fun scheduleRegister() {
+        if (stopping) return
+        if (registerAttempts.incrementAndGet() > REGISTER_RETRY_LIMIT) {
+            Log.w(TAG, "registerApp gave up after $REGISTER_RETRY_LIMIT attempts")
+            return
+        }
+        mainHandler.postDelayed({
+            if (!isAppRegistered && !stopping) registerApp()
+        }, REGISTER_RETRY_DELAY_MS)
+    }
+
     private fun registerApp() {
+        if (stopping) return
         val hid = hidDevice ?: return
         val descriptor = if (isWindowsDInputMode) DESCRIPTOR_DINPUT else DESCRIPTOR_HID
         val sdp = BluetoothHidDeviceAppSdpSettings(
@@ -327,10 +430,16 @@ class BluetoothHidGamepad(context: Context) {
             BluetoothHidDeviceAppQosSettings.SERVICE_BEST_EFFORT,
             800, 9, 0, 10, 50
         )
-        try {
-            hid.registerApp(sdp, qos, qos, hidExecutor, hidCallback)
+        val accepted = try {
+            hid.registerApp(sdp, qos, qos, callbackExecutor, hidCallback)
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException registerApp", e)
+            return
+        }
+        // The stack rejects a register that lands before the previous app is fully torn down.
+        if (!accepted) {
+            Log.d(TAG, "registerApp rejected, retry ${registerAttempts.get() + 1}")
+            scheduleRegister()
         }
     }
 
@@ -338,18 +447,39 @@ class BluetoothHidGamepad(context: Context) {
         if (hidDevice == null || !isAppRegistered) {
             // Profile or app not ready yet — queue and connect automatically once registered
             pendingConnectDevice = device
+            if (!isAppRegistered && hidDevice != null && !stopping) {
+                registerAttempts.set(0)
+                registerApp()
+            }
             Toast.makeText(context, "Initialising… will connect shortly", Toast.LENGTH_SHORT).show()
             return
         }
         pendingConnectDevice = null
-        try {
-            hidDevice?.connect(device)
+        beginConnect(device)
+    }
+
+    // Record CONNECTING synchronously: the stack reports it too late to guard stop()/switchMode().
+    private fun beginConnect(device: BluetoothDevice) {
+        val hid = hidDevice ?: return
+        activeDevice = device
+        connectionState = BluetoothProfile.STATE_CONNECTING
+        sendsSuppressed = false
+        val requested = try {
+            hid.connect(device)
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException connect", e)
+            false
         }
+        if (!requested) {
+            activeDevice = null
+            connectionState = BluetoothProfile.STATE_DISCONNECTED
+        }
+        onStatusChanged?.invoke()
     }
 
     fun cancelConnect(device: BluetoothDevice) {
+        pendingConnectDevice = null
+        sendsSuppressed = true
         val hid = hidDevice ?: return
         try {
             hid.disconnect(device)
@@ -469,7 +599,8 @@ class BluetoothHidGamepad(context: Context) {
         val snapshot = report.clone()
         lastEnqueued = snapshot
         try {
-            hidExecutor.submit {
+            sendExecutor.submit {
+                if (sendsSuppressed) return@submit
                 val device = connectedDevice ?: return@submit
                 val hid = hidDevice ?: return@submit
                 try {
@@ -479,7 +610,7 @@ class BluetoothHidGamepad(context: Context) {
                     // succeeds, so the host never sees the press. Retry briefly so the frame lands.
                     var success = false
                     var attempts = 0
-                    while (!success && attempts < SEND_RETRY_LIMIT) {
+                    while (!success && attempts < SEND_RETRY_LIMIT && !sendsSuppressed) {
                         success = hid.sendReport(device, 0, snapshot)
                         if (!success) {
                             try {
@@ -500,25 +631,66 @@ class BluetoothHidGamepad(context: Context) {
         }
     }
 
-    fun stop() {
+    // Unregistering while a host is connected wedges the stack, so disconnect first and finish
+    // once DISCONNECTED arrives (or the timeout passes). onStopped runs on the main thread.
+    fun stop(onStopped: () -> Unit = {}) {
+        val previous = stopCompletion
+        if (previous != null) {
+            stopCompletion = { previous(); onStopped() }
+            return
+        }
+        stopCompletion = onStopped
+        stopping = true
+        sendsSuppressed = true
+        Log.d(TAG, "stop() state=$connectionState device=${activeDevice != null}")
         onStatusChanged = null
         pendingConnectDevice = null
+        pendingModeSwitch = false
+        mainHandler.removeCallbacksAndMessages(null)
         try { context.unregisterReceiver(btStateReceiver) } catch (_: Exception) {}
-        try {
-            hidDevice?.unregisterApp()
-        } catch (e: SecurityException) {
-            Log.e(TAG, "SecurityException unregisterApp", e)
+        if (hidDevice != null && connectionState != BluetoothProfile.STATE_DISCONNECTED) {
+            disconnectActive()
+            mainHandler.postDelayed({ finishStop() }, STOP_DISCONNECT_TIMEOUT_MS)
+        } else {
+            finishStop()
         }
-        try {
-            hidExecutor.shutdownNow()
-        } catch (_: Exception) {}
-        hidDevice?.let {
-            bluetoothAdapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, it)
-        }
+    }
+
+    private fun finishStop() {
+        val done = stopCompletion ?: return
+        stopCompletion = null
+        mainHandler.removeCallbacksAndMessages(null)
+        val hid = hidDevice
+        // unregisterApp() is per-UID: a superseded instance would tear down the live session.
+        val superseded = current !== this
+        // Unregistering while the link is up wedges the stack; only the timeout path can land here.
+        val linkDown = connectionState == BluetoothProfile.STATE_DISCONNECTED
+        Log.d(TAG, "finishStop linkDown=$linkDown superseded=$superseded")
         hidDevice = null
         connectedDevice = null
+        activeDevice = null
         isConnected = false
         isAppRegistered = false
         connectionState = BluetoothProfile.STATE_DISCONNECTED
+        if (!superseded) {
+            if (linkDown) {
+                try {
+                    hid?.unregisterApp()
+                } catch (e: SecurityException) {
+                    Log.e(TAG, "SecurityException unregisterApp", e)
+                }
+            }
+            hid?.let { bluetoothAdapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, it) }
+            current = null
+        }
+        try {
+            sendExecutor.shutdownNow()
+        } catch (_: Exception) {}
+        done()
     }
+
+    // DiscardPolicy: a task submitted after shutdown is dropped rather than thrown on a binder thread.
+    private fun newExecutor(): ExecutorService =
+        ThreadPoolExecutor(1, 1, 30L, TimeUnit.SECONDS, LinkedBlockingQueue(), ThreadPoolExecutor.DiscardPolicy())
+            .apply { allowCoreThreadTimeOut(true) }
 }

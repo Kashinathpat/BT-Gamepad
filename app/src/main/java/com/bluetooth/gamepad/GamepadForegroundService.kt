@@ -8,14 +8,15 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 
 class GamepadForegroundService : Service() {
 
     companion object {
-        const val ACTION_START = "com.bluetooth.gamepad.START"
         private const val CHANNEL_ID  = "gamepad_channel"
         private const val NOTIFICATION_ID = 1
+        private const val TAG = "BtHidGamepad"
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -42,6 +43,13 @@ class GamepadForegroundService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val gamepad = BluetoothHidGamepad.current
+        Log.d(TAG, "onTaskRemoved gamepad=${gamepad != null}")
+        if (gamepad == null) { stopSelf(); return }
+        gamepad.stop { if (BluetoothHidGamepad.current == null) stopSelf() }
+    }
 
     private fun createChannel() {
         val manager = getSystemService(NotificationManager::class.java)

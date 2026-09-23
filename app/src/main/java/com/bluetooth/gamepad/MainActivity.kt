@@ -376,6 +376,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // The service can stop the gamepad without this activity being destroyed.
+        if (gamepad !== BluetoothHidGamepad.current) gamepad = null
         if (gamepad == null) {
             gamepad = BluetoothHidGamepad(this).also { gp ->
                 gp.isWindowsDInputMode = isWindowsMode.value
@@ -392,17 +394,8 @@ class MainActivity : ComponentActivity() {
                             BluetoothProfile.STATE_CONNECTED -> {
                                 prefs.edit().putString("lastDeviceAddress", gp.connectedDevice?.address).apply()
                                 Toast.makeText(this, "Connected to ${gp.connectedDeviceName}", Toast.LENGTH_SHORT).show()
-                                // Protect the live HID session from background termination. Started
-                                // per-connection so reconnections are covered. Can throw on API 31+
-                                // if the connect lands while backgrounded, so guard it.
-                                try {
-                                    startForegroundService(Intent(this, GamepadForegroundService::class.java).apply {
-                                        action = GamepadForegroundService.ACTION_START
-                                    })
-                                } catch (_: Exception) { }
                             }
                             BluetoothProfile.STATE_DISCONNECTED -> {
-                                stopService(Intent(this, GamepadForegroundService::class.java))
                                 if (!userCancelledConnect) {
                                     when (prevState) {
                                         BluetoothProfile.STATE_CONNECTING ->
@@ -418,36 +411,41 @@ class MainActivity : ComponentActivity() {
                 }
                 gp.start()
             }
-            // The foreground service is started on connection (STATE_CONNECTED), not here, so it
-            // tracks the actual HID session and is correctly re-started on every reconnect.
             if (prefs.getBoolean("autoReconnect", true)) {
                 reconnectLastDevice()
             }
         }
+        // The stack unregisters a HID app whose process drops below foreground-service importance.
+        startGamepadService()
         ownDeviceName.value = gamepad?.ownDeviceName ?: ""
+    }
+
+    private fun startGamepadService() {
+        try {
+            startForegroundService(Intent(this, GamepadForegroundService::class.java))
+        } catch (_: Exception) { }
     }
 
     override fun onResume() {
         super.onResume()
-        // A connect that landed while backgrounded may have had its service start rejected.
-        if (gamepad?.isConnected == true) {
-            try {
-                startForegroundService(Intent(this, GamepadForegroundService::class.java).apply {
-                    action = GamepadForegroundService.ACTION_START
-                })
-            } catch (_: Exception) { }
-        }
+        if (gamepad !== BluetoothHidGamepad.current) initGamepad()
+        if (gamepad != null) startGamepadService()
     }
 
     private fun stopGamepad() {
-        gamepad?.stop()
+        val app = applicationContext
+        // Deferred: skip if the app was relaunched meanwhile and a new instance owns the service.
+        val stopService: () -> Unit = {
+            if (BluetoothHidGamepad.current == null) app.stopService(Intent(app, GamepadForegroundService::class.java))
+        }
+        val gp = gamepad
         gamepad = null
         controllerVisible.value = false
         hidProfileConnected.value = false
         hidAppRegistered.value = false
         hidConnectionState.value = BluetoothProfile.STATE_DISCONNECTED
         connectedDeviceName.value = ""
-        stopService(Intent(this, GamepadForegroundService::class.java))
+        if (gp != null) gp.stop(stopService) else stopService()
     }
 
     private fun reconnectLastDevice() {
