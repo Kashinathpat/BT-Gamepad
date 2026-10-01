@@ -1,5 +1,9 @@
 package com.bluetooth.gamepad
 
+import android.os.Handler
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -14,32 +18,42 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.ExploreOff
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
-import android.os.VibrationEffect
-import android.os.Vibrator
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -48,23 +62,22 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bluetooth.gamepad.ui.theme.BtnA
-import com.bluetooth.gamepad.ui.theme.BtnB
-import com.bluetooth.gamepad.ui.theme.BtnPrimary
-import com.bluetooth.gamepad.ui.theme.ControllerOnBtn
-import com.bluetooth.gamepad.ui.theme.OverlayPillLight
-import com.bluetooth.gamepad.ui.theme.StickLabel
-import com.bluetooth.gamepad.ui.theme.BtnSecondary
-import com.bluetooth.gamepad.ui.theme.BtnX
-import com.bluetooth.gamepad.ui.theme.BtnY
 import com.bluetooth.gamepad.ui.theme.ControllerBg
+import com.bluetooth.gamepad.ui.theme.ControllerOnBtn
 import com.bluetooth.gamepad.ui.theme.DpadNormal
 import com.bluetooth.gamepad.ui.theme.DpadPressed
+import com.bluetooth.gamepad.ui.theme.OverlayPillLight
 import com.bluetooth.gamepad.ui.theme.StatusConnected
 import com.bluetooth.gamepad.ui.theme.StickBase
 import com.bluetooth.gamepad.ui.theme.StickKnob
+import com.bluetooth.gamepad.ui.theme.StickLabel
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
+
+private const val FLOATING_STICK_FRAC = 0.24f
+
+private const val EDGE_EXCLUSION_DP = 48f
 
 // A single full-screen pointer dispatcher reads every pointer and routes each, by PointerId, to the
 // control whose region it first landed on. The control keeps the pointer until that finger lifts, so
@@ -77,11 +90,62 @@ private class RuntimeControl(
     val bottom: Float,
     val onDown: (localX: Float, localY: Float) -> Unit,
     val onMove: (localX: Float, localY: Float) -> Unit,
-    val onUp: () -> Unit
+    val onUp: () -> Unit,
+    // Full release, including latched toggles and running turbo; used when the input surface restarts.
+    val onReset: () -> Unit = onUp,
+    // Claimed only by a real touch-down, never a finger sliding in or left over from another control.
+    val freshDownOnly: Boolean = false
 ) {
     var pointerId: PointerId? = null
     fun contains(x: Float, y: Float) = x >= left && x <= right && y >= top && y <= bottom
     val area get() = (right - left) * (bottom - top)
+}
+
+// Press count per HID button, so a button shared by several controls is released by the last holder only.
+private class ButtonMixer(private val gamepad: BluetoothHidGamepad?) {
+    private val counts = IntArray(16)
+
+    fun press(index: Int) {
+        if (counts[index]++ == 0) gamepad?.setButtonState(index, true)
+    }
+
+    fun release(index: Int) {
+        if (counts[index] == 0) return
+        if (--counts[index] == 0) gamepad?.setButtonState(index, false)
+    }
+
+    fun clear() = counts.fill(0)
+}
+
+// Sensor thread emits through here; the lock orders the final zero after any in-flight sample.
+private class GyroGate {
+    private var allowed = true
+    var userOn = true
+    var gated = false
+    var holds = 0
+
+    fun update(motion: MotionSensorManager, gamepad: BluetoothHidGamepad?) {
+        val next = userOn && (!gated || holds > 0)
+        synchronized(this) {
+            if (next == allowed) return
+            allowed = next
+            motion.recenter()
+            if (!next) gamepad?.setRightStickMotion(0f, 0f)
+        }
+    }
+
+    fun close(gamepad: BluetoothHidGamepad?) {
+        synchronized(this) {
+            allowed = false
+            gamepad?.setRightStickMotion(0f, 0f)
+        }
+    }
+
+    fun emit(gamepad: BluetoothHidGamepad?, x: Float, y: Float) {
+        synchronized(this) {
+            if (allowed) gamepad?.setRightStickMotion(x, y)
+        }
+    }
 }
 
 @Composable
@@ -89,13 +153,18 @@ fun ControllerScreen(
     gamepad: BluetoothHidGamepad?,
     isWindowsMode: Boolean,
     connectedDeviceName: String,
+    isConnected: Boolean = true,
     layout: ControllerLayout = ControllerLayout.default(),
+    layouts: List<ControllerLayout> = emptyList(),
+    onLayoutSelect: (String) -> Unit = {},
     hapticIntensity: HapticIntensity = HapticIntensity.MEDIUM,
     motionEnabled: Boolean = false,
     motionMode: MotionMode = MotionMode.AIM,
     motionSensitivity: Float = 90f,
     motionInvertX: Boolean = false,
     motionInvertY: Boolean = false,
+    oledMode: Boolean = false,
+    blockEdgeGestures: Boolean = false,
     onStopClick: () -> Unit
 ) {
     val density = LocalDensity.current.density
@@ -103,17 +172,20 @@ fun ControllerScreen(
 
     val motionManager = remember { MotionSensorManager(context) }
     val vibrator = remember { obtainVibrator(context) }
+    val gate = remember { GyroGate() }
+    val gyroOn = remember { mutableStateOf(true) }
+    val motionAvailable = motionEnabled && motionManager.isModeAvailable(motionMode)
 
-    // Keyed only on what changes the registered sensor; tunables go through updateTuning below so
+    // Keyed only on what changes the sensor or where it sends; tunables go through updateTuning below so
     // a slider drag does not restart the sensor thread and rerun bias calibration.
-    DisposableEffect(motionEnabled, motionMode) {
-        if (motionEnabled && motionManager.isModeAvailable(motionMode)) {
-            motionManager.onMotion = { x, y -> gamepad?.setRightStickMotion(x, y) }
+    DisposableEffect(motionEnabled, motionMode, gamepad) {
+        if (motionAvailable) {
+            motionManager.onMotion = { x, y -> gate.emit(gamepad, x, y) }
             motionManager.start(motionMode, motionSensitivity, motionInvertX, motionInvertY)
         }
         onDispose {
             motionManager.stop()
-            gamepad?.setRightStickMotion(0f, 0f)
+            gate.close(gamepad)
         }
     }
 
@@ -121,10 +193,20 @@ fun ControllerScreen(
         motionManager.updateTuning(motionSensitivity, motionInvertX, motionInvertY)
     }
 
+    // Hold-to-aim applies to Aim mode only; steering needs the sensor all the time.
+    val gated = motionMode == MotionMode.AIM && layout.buttons.any { it.gyroGate && it.isPressable }
+    // Read here, not inside SideEffect, so toggling it recomposes this scope and reruns the effect.
+    val userOn = gyroOn.value
+    SideEffect {
+        gate.gated = gated
+        gate.userOn = userOn
+        gate.update(motionManager, gamepad)
+    }
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(ControllerBg)
+            .background(if (oledMode) Color.Black else ControllerBg)
     ) {
         val w = constraints.maxWidth.toFloat()
         val h = constraints.maxHeight.toFloat()
@@ -133,12 +215,26 @@ fun ControllerScreen(
         // Per-control visual state, keyed by control id and shared with the drawing pass.
         val pressedButtons = remember { mutableStateMapOf<String, Boolean>() }
         val stickOffsets = remember { mutableStateMapOf<String, Offset>() }
+        val stickOrigins = remember { mutableStateMapOf<String, Offset>() }
         val dpadDirs = remember { mutableStateMapOf<String, DpadState>() }
+        val mixer = remember(gamepad) { ButtonMixer(gamepad) }
+        val handler = remember { Handler(Looper.getMainLooper()) }
 
-        val controls = remember(layout, isWindowsMode, hapticIntensity, w, h) {
+        // Rebuilt on every (re)connect: the link clears the HID report, so controls and press counts restart released.
+        val controls = remember(layout, isWindowsMode, hapticIntensity, w, h, gamepad, isConnected) {
             buildControls(
-                layout, w, h, dim, gamepad, isWindowsMode, hapticIntensity, vibrator,
-                pressedButtons, stickOffsets, dpadDirs
+                ControlEnv(
+                    w = w, h = h, dim = dim, gamepad = gamepad, isWindowsMode = isWindowsMode,
+                    mixer = mixer, handler = handler,
+                    haptic = { vibrateForIntensity(vibrator, hapticIntensity) },
+                    onGateHold = { held ->
+                        gate.holds = (gate.holds + if (held) 1 else -1).coerceAtLeast(0)
+                        gate.update(motionManager, gamepad)
+                    },
+                    pressedButtons = pressedButtons, stickOffsets = stickOffsets,
+                    stickOrigins = stickOrigins, dpadDirs = dpadDirs
+                ),
+                layout
             )
         }
 
@@ -149,7 +245,8 @@ fun ControllerScreen(
                     // On (re)start, release everything: a finger held across a layout/orientation
                     // change is not re-adopted (it cannot be told apart from a finger sliding in), so
                     // releasing here guarantees nothing stays stuck.
-                    controls.forEach { it.onUp() }
+                    controls.forEach { it.onReset() }
+                    mixer.clear()
                     gamepad?.resetAll()
                     try {
                         awaitPointerEventScope {
@@ -180,6 +277,7 @@ fun ControllerScreen(
                                         it.contains(change.position.x, change.position.y)
                                     } ?: continue
                                     if (target.pointerId != null) continue
+                                    if (target.freshDownOnly && !change.changedToDown()) continue
                                     target.pointerId = change.id
                                     change.consume()
                                     target.onDown(change.position.x - target.left, change.position.y - target.top)
@@ -194,283 +292,468 @@ fun ControllerScreen(
                     } finally {
                         // Cancelled (composable detached, app paused): release so nothing stays pressed.
                         controls.forEach {
-                            if (it.pointerId != null) { it.pointerId = null; it.onUp() }
+                            it.pointerId = null
+                            it.onReset()
                         }
+                        mixer.clear()
                         gamepad?.resetAll()
                     }
                 }
         )
 
         // Drawing pass: pure visuals, positioned to match the hit-regions in buildControls.
+        // Android honours only ~200dp of exclusion per edge, so it is spent on controls near an edge.
+        val edgePx = EDGE_EXCLUSION_DP * density
         layout.buttons.forEach { btn ->
             val btnPx = btn.sizeFrac * dim
             val btnDp = (btnPx / density).dp
             val topLeftX = (btn.xFrac * w - btnPx / 2f).roundToInt()
             val topLeftY = (btn.yFrac * h - btnPx / 2f).roundToInt()
+            val nearLeft = topLeftX < edgePx
+            val nearRight = topLeftX + btnPx > w - edgePx
 
             Box(
                 modifier = Modifier
                     .offset { IntOffset(topLeftX, topLeftY) }
-                    .size(btnDp),
+                    .size(btnDp)
+                    .then(
+                        if (blockEdgeGestures && (nearLeft || nearRight)) {
+                            // Stretched to the screen edge: the back gesture starts in the edge strip, not on the control.
+                            Modifier.systemGestureExclusion { coords ->
+                                Rect(
+                                    left = if (nearLeft) -topLeftX.toFloat() else 0f,
+                                    top = 0f,
+                                    right = if (nearRight) w - topLeftX else coords.size.width.toFloat(),
+                                    bottom = coords.size.height.toFloat()
+                                )
+                            }
+                        } else Modifier
+                    )
+                    .alpha(btn.opacity),
                 contentAlignment = Alignment.Center
             ) {
-                when (btn.baseId) {
-                    "LSTICK", "RSTICK" -> StickVisual(
+                when {
+                    btn.isStick && btn.floating -> FloatingStickVisual(
+                        zoneSize = btnDp,
+                        stickPx = FLOATING_STICK_FRAC * dim,
+                        density = density,
+                        label = if (btn.baseId == "LSTICK") "L" else "R",
+                        origin = stickOrigins[btn.id],
+                        offset = stickOffsets[btn.id] ?: Offset.Zero,
+                        oled = oledMode
+                    )
+                    btn.isStick -> StickVisual(
                         size = btnDp,
                         label = if (btn.baseId == "LSTICK") "L" else "R",
-                        offset = stickOffsets[btn.id] ?: Offset.Zero
+                        offset = stickOffsets[btn.id] ?: Offset.Zero,
+                        oled = oledMode
                     )
-                    "DPAD" -> DpadVisual(dir = dpadDirs[btn.id], size = btnDp)
-                    "TPADL", "TPADR", "TPADD" -> TouchpadVisual(
+                    btn.baseId == "DPAD" -> DpadVisual(dir = dpadDirs[btn.id], size = btnDp, oled = oledMode)
+                    btn.baseId.startsWith("TPAD") -> TouchpadVisual(
                         size = btnDp,
                         mode = btn.baseId,
-                        dir = if (btn.baseId == "TPADD") dpadDirs[btn.id] else null
+                        dir = if (btn.baseId == "TPADD") dpadDirs[btn.id] else null,
+                        oled = oledMode
                     )
-                    else -> ButtonVisual(
-                        spec = buttonSpec(btn.baseId, btn.label, btnDp.value),
-                        size = btnDp,
-                        pressed = pressedButtons[btn.id] == true
-                    )
+                    btn.isPressable -> ButtonVisual(btn, btnDp, pressedButtons[btn.id] == true, oledMode)
                 }
             }
         }
 
-        Row(
+        QuickPill(
             modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(top = 4.dp, start = 4.dp)
-                .background(OverlayPillLight, RoundedCornerShape(24.dp))
-                .padding(end = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onStopClick, modifier = Modifier.size(36.dp)) {
+                .align(Alignment.TopCenter)
+                // Sits below system overlays that some phones draw over the top centre.
+                .padding(top = 34.dp),
+            connectedDeviceName = connectedDeviceName,
+            layouts = layouts,
+            activeLayoutId = layout.id,
+            onLayoutSelect = onLayoutSelect,
+            motionAvailable = motionAvailable,
+            gyroOn = gyroOn.value,
+            onGyroToggle = { gyroOn.value = !gyroOn.value },
+            onRecenter = { motionManager.recenter() },
+            onBack = onStopClick
+        )
+    }
+}
+
+@Composable
+private fun QuickPill(
+    modifier: Modifier,
+    connectedDeviceName: String,
+    layouts: List<ControllerLayout>,
+    activeLayoutId: String,
+    onLayoutSelect: (String) -> Unit,
+    motionAvailable: Boolean,
+    gyroOn: Boolean,
+    onGyroToggle: () -> Unit,
+    onRecenter: () -> Unit,
+    onBack: () -> Unit
+) {
+    val expanded = remember { mutableStateOf(false) }
+    val layoutMenu = remember { mutableStateOf(false) }
+    Row(
+        modifier = modifier
+            .alpha(if (expanded.value) 1f else 0.6f)
+            .background(OverlayPillLight, RoundedCornerShape(24.dp)),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (!expanded.value) {
+            IconButton(onClick = { expanded.value = true }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.MoreHoriz, contentDescription = "Quick menu", tint = ControllerOnBtn)
+            }
+        } else {
+            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = ControllerOnBtn)
             }
-            if (motionEnabled && motionManager.isModeAvailable(motionMode)) {
-                IconButton(
-                    onClick = {
-                        motionManager.recenter()
-                        gamepad?.setRightStickMotion(0f, 0f)
-                    },
-                    modifier = Modifier.size(36.dp)
-                ) {
+            if (layouts.size > 1) {
+                Box {
+                    IconButton(onClick = { layoutMenu.value = true }, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.Layers, contentDescription = "Switch layout", tint = ControllerOnBtn)
+                    }
+                    DropdownMenu(expanded = layoutMenu.value, onDismissRequest = { layoutMenu.value = false }) {
+                        layouts.forEach { l ->
+                            DropdownMenuItem(
+                                text = { Text(l.name) },
+                                trailingIcon = if (l.id == activeLayoutId) {
+                                    { Icon(Icons.Default.Check, contentDescription = null) }
+                                } else null,
+                                onClick = {
+                                    layoutMenu.value = false
+                                    onLayoutSelect(l.id)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            if (motionAvailable) {
+                IconButton(onClick = onGyroToggle, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        if (gyroOn) Icons.Default.Explore else Icons.Default.ExploreOff,
+                        contentDescription = if (gyroOn) "Turn gyro off" else "Turn gyro on",
+                        tint = ControllerOnBtn
+                    )
+                }
+                IconButton(onClick = onRecenter, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Default.CenterFocusStrong, contentDescription = "Recenter motion", tint = ControllerOnBtn)
                 }
             }
             if (connectedDeviceName.isNotEmpty()) {
-                Text(text = connectedDeviceName, fontSize = 11.sp, color = StatusConnected)
+                Text(
+                    text = connectedDeviceName,
+                    fontSize = 11.sp,
+                    color = StatusConnected,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+            IconButton(onClick = { expanded.value = false }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.ChevronLeft, contentDescription = "Collapse", tint = ControllerOnBtn)
             }
         }
     }
 }
 
-private data class ButtonSpec(
-    val label: String,
-    val shape: Shape,
-    val color: Color,
-    val fontSize: Int,
-    val buttonIndex: Int?  // HID index; null for decorative buttons or shoulders (see shoulderIndex)
-)
-
-private fun buttonSpec(baseId: String, fallbackLabel: String, btnDpValue: Float): ButtonSpec = when (baseId) {
-    "A"  -> ButtonSpec("A",  CircleShape, BtnA, (btnDpValue * 0.3f).toInt(), BluetoothHidGamepad.BUTTON_A)
-    "B"  -> ButtonSpec("B",  CircleShape, BtnB, (btnDpValue * 0.3f).toInt(), BluetoothHidGamepad.BUTTON_B)
-    "X"  -> ButtonSpec("X",  CircleShape, BtnX, (btnDpValue * 0.3f).toInt(), BluetoothHidGamepad.BUTTON_X)
-    "Y"  -> ButtonSpec("Y",  CircleShape, BtnY, (btnDpValue * 0.3f).toInt(), BluetoothHidGamepad.BUTTON_Y)
-    "LB" -> ButtonSpec("LB", RoundedCornerShape(8.dp), BtnPrimary,   (btnDpValue * 0.25f).toInt(), null)
-    "RB" -> ButtonSpec("RB", RoundedCornerShape(8.dp), BtnPrimary,   (btnDpValue * 0.25f).toInt(), null)
-    "LT" -> ButtonSpec("LT", RoundedCornerShape(8.dp), BtnSecondary, (btnDpValue * 0.25f).toInt(), null)
-    "RT" -> ButtonSpec("RT", RoundedCornerShape(8.dp), BtnSecondary, (btnDpValue * 0.25f).toInt(), null)
-    "LSB"-> ButtonSpec("LSB", CircleShape, BtnSecondary, (btnDpValue * 0.22f).toInt(), BluetoothHidGamepad.BUTTON_L3)
-    "RSB"-> ButtonSpec("RSB", CircleShape, BtnSecondary, (btnDpValue * 0.22f).toInt(), BluetoothHidGamepad.BUTTON_R3)
-    "SELECT" -> ButtonSpec("SEL",   RoundedCornerShape(50), BtnSecondary, (btnDpValue * 0.2f).toInt(), BluetoothHidGamepad.BUTTON_SELECT)
-    "START"  -> ButtonSpec("START", RoundedCornerShape(50), BtnSecondary, (btnDpValue * 0.2f).toInt(), BluetoothHidGamepad.BUTTON_START)
-    else -> ButtonSpec(fallbackLabel, CircleShape, BtnPrimary, (btnDpValue * 0.25f).toInt(), null)
+private class ControlEnv(
+    val w: Float,
+    val h: Float,
+    val dim: Float,
+    val gamepad: BluetoothHidGamepad?,
+    val isWindowsMode: Boolean,
+    val mixer: ButtonMixer,
+    val handler: Handler,
+    val haptic: () -> Unit,
+    val onGateHold: (Boolean) -> Unit,
+    val pressedButtons: SnapshotStateMap<String, Boolean>,
+    val stickOffsets: SnapshotStateMap<String, Offset>,
+    val stickOrigins: SnapshotStateMap<String, Offset>,
+    val dpadDirs: SnapshotStateMap<String, DpadState>
+) {
+    // Sticks currently held, by control id, so a duplicate stick is not centred while another holds it.
+    val stickHolds = LinkedHashMap<String, StickHold>()
 }
 
-// Shoulder HID index, honouring the Windows/standard swap (LB<->LT, RB<->RT).
-private fun shoulderIndex(baseId: String, isWindowsMode: Boolean): Int = when (baseId) {
+private class StickHold(val isRight: Boolean, val x: Float, val y: Float)
+
+// Shoulders honour the Windows/standard swap (LB<->LT, RB<->RT).
+private fun hidIndex(baseId: String, isWindowsMode: Boolean): Int? = when (baseId) {
+    "A" -> BluetoothHidGamepad.BUTTON_A
+    "B" -> BluetoothHidGamepad.BUTTON_B
+    "X" -> BluetoothHidGamepad.BUTTON_X
+    "Y" -> BluetoothHidGamepad.BUTTON_Y
     "LB" -> if (isWindowsMode) BluetoothHidGamepad.BUTTON_LB else BluetoothHidGamepad.BUTTON_LT
     "RB" -> if (isWindowsMode) BluetoothHidGamepad.BUTTON_RB else BluetoothHidGamepad.BUTTON_RT
     "LT" -> if (isWindowsMode) BluetoothHidGamepad.BUTTON_LT else BluetoothHidGamepad.BUTTON_LB
-    else -> if (isWindowsMode) BluetoothHidGamepad.BUTTON_RT else BluetoothHidGamepad.BUTTON_RB
+    "RT" -> if (isWindowsMode) BluetoothHidGamepad.BUTTON_RT else BluetoothHidGamepad.BUTTON_RB
+    "LSB" -> BluetoothHidGamepad.BUTTON_L3
+    "RSB" -> BluetoothHidGamepad.BUTTON_R3
+    "SELECT" -> BluetoothHidGamepad.BUTTON_SELECT
+    "START" -> BluetoothHidGamepad.BUTTON_START
+    else -> null
 }
 
-private fun buildControls(
-    layout: ControllerLayout,
-    w: Float,
-    h: Float,
-    dim: Float,
-    gamepad: BluetoothHidGamepad?,
-    isWindowsMode: Boolean,
-    hapticIntensity: HapticIntensity,
-    vibrator: Vibrator,
-    pressedButtons: SnapshotStateMap<String, Boolean>,
-    stickOffsets: SnapshotStateMap<String, Offset>,
-    dpadDirs: SnapshotStateMap<String, DpadState>
-): List<RuntimeControl> {
+private fun buildControls(env: ControlEnv, layout: ControllerLayout): List<RuntimeControl> {
     val list = ArrayList<RuntimeControl>(layout.buttons.size)
     layout.buttons.forEach { btn ->
-        val btnPx = btn.sizeFrac * dim
-        val cx = btn.xFrac * w
-        val cy = btn.yFrac * h
+        val btnPx = btn.sizeFrac * env.dim
+        val cx = btn.xFrac * env.w
+        val cy = btn.yFrac * env.h
         val left = cx - btnPx / 2f
         val top = cy - btnPx / 2f
-        val right = cx + btnPx / 2f
-        val bottom = cy + btnPx / 2f
-        val radius = btnPx / 2f
-
-        when (btn.baseId) {
-            "LSTICK", "RSTICK" -> {
-                val isRight = btn.baseId == "RSTICK"
-                val maxOffset = (btnPx - btnPx * 0.4f) / 2f  // knob is 0.4 of base
-                fun apply(localX: Float, localY: Float) {
-                    // Absolute position from centre, vector clamped to the rim: a finger outside the
-                    // circle pins to the rim and stays there until it crosses back, rather than
-                    // jumping to the opposite side.
-                    var ox = localX - radius
-                    var oy = localY - radius
-                    val dist = sqrt(ox * ox + oy * oy)
-                    if (dist > maxOffset && dist > 0f) {
-                        ox = ox / dist * maxOffset
-                        oy = oy / dist * maxOffset
-                    }
-                    stickOffsets[btn.id] = Offset(ox, oy)
-                    val nx = if (maxOffset > 0f) (ox / maxOffset).coerceIn(-1f, 1f) else 0f
-                    val ny = if (maxOffset > 0f) (oy / maxOffset).coerceIn(-1f, 1f) else 0f
-                    if (isRight) gamepad?.setRightStickTouch(nx, ny) else gamepad?.setLeftStick(nx, ny)
-                }
-                list.add(
-                    RuntimeControl(
-                        left, top, right, bottom,
-                        onDown = { lx, ly -> apply(lx, ly) },
-                        onMove = { lx, ly -> apply(lx, ly) },
-                        onUp = {
-                            stickOffsets[btn.id] = Offset.Zero
-                            if (isRight) gamepad?.setRightStickTouch(0f, 0f) else gamepad?.setLeftStick(0f, 0f)
-                        }
-                    )
-                )
-            }
-            "DPAD" -> {
-                val dead = radius * 0.25f
-                fun apply(localX: Float, localY: Float) {
-                    val dx = localX - radius
-                    val dy = localY - radius
-                    val newH = when { dx > dead -> DpadDir.RIGHT; dx < -dead -> DpadDir.LEFT; else -> null }
-                    val newV = when { dy < -dead -> DpadDir.UP;  dy > dead  -> DpadDir.DOWN; else -> null }
-                    val prev = dpadDirs[btn.id]
-                    if (prev == null || prev.h != newH || prev.v != newV) {
-                        val isNewPress = (newH != null && newH != prev?.h) || (newV != null && newV != prev?.v)
-                        if (isNewPress) vibrateForIntensity(vibrator, hapticIntensity)
-                        dpadDirs[btn.id] = DpadState(newH, newV)
-                        sendDpad(gamepad, isWindowsMode, newH, newV)
-                    }
-                }
-                list.add(
-                    RuntimeControl(
-                        left, top, right, bottom,
-                        onDown = { lx, ly -> apply(lx, ly) },
-                        onMove = { lx, ly -> apply(lx, ly) },
-                        onUp = {
-                            dpadDirs[btn.id] = DpadState(null, null)
-                            sendDpad(gamepad, isWindowsMode, null, null)
-                        }
-                    )
-                )
-            }
-            "TPADL", "TPADR", "TPADD" -> {
-                // Touchpad: a plain surface mimicking a chosen control. The mapped mode is baked into
-                // the base id at placement (TPADL=left stick, TPADR=right stick, TPADD=d-pad).
-                when (btn.baseId) {
-                    "TPADD" -> {
-                        // D-pad mode: 8-way direction taken from where the finger first lands, so the
-                        // initial touch sets the origin and dragging away from it picks a direction.
-                        var originX = 0f
-                        var originY = 0f
-                        val dead = btnPx * 0.12f
-                        fun apply(localX: Float, localY: Float) {
-                            val dx = localX - originX
-                            val dy = localY - originY
-                            val newH = when { dx > dead -> DpadDir.RIGHT; dx < -dead -> DpadDir.LEFT; else -> null }
-                            val newV = when { dy < -dead -> DpadDir.UP;  dy > dead  -> DpadDir.DOWN; else -> null }
-                            val prev = dpadDirs[btn.id]
-                            if (prev == null || prev.h != newH || prev.v != newV) {
-                                val isNewPress = (newH != null && newH != prev?.h) || (newV != null && newV != prev?.v)
-                                if (isNewPress) vibrateForIntensity(vibrator, hapticIntensity)
-                                dpadDirs[btn.id] = DpadState(newH, newV)
-                                sendDpad(gamepad, isWindowsMode, newH, newV)
-                            }
-                        }
-                        list.add(
-                            RuntimeControl(
-                                left, top, right, bottom,
-                                onDown = { lx, ly -> originX = lx; originY = ly; apply(lx, ly) },
-                                onMove = { lx, ly -> apply(lx, ly) },
-                                onUp = {
-                                    dpadDirs[btn.id] = DpadState(null, null)
-                                    sendDpad(gamepad, isWindowsMode, null, null)
-                                }
-                            )
-                        )
-                    }
-                    else -> {
-                        // Stick mode (trackpad style): the point where the finger first lands is the
-                        // origin ("centre") for that touch. The stick value is the offset from that
-                        // origin, so the same physical drag gives the same deflection wherever you
-                        // started. Releasing springs to centre; the next touch sets a fresh origin.
-                        val isRight = btn.baseId == "TPADR"
-                        // Full deflection when dragged ~40% of the pad width from the origin.
-                        val range = btnPx * 0.4f
-                        var originX = 0f
-                        var originY = 0f
-                        fun apply(localX: Float, localY: Float) {
-                            val nx = if (range > 0f) ((localX - originX) / range).coerceIn(-1f, 1f) else 0f
-                            val ny = if (range > 0f) ((localY - originY) / range).coerceIn(-1f, 1f) else 0f
-                            if (isRight) gamepad?.setRightStickTouch(nx, ny) else gamepad?.setLeftStick(nx, ny)
-                        }
-                        list.add(
-                            RuntimeControl(
-                                left, top, right, bottom,
-                                onDown = { lx, ly -> originX = lx; originY = ly; apply(lx, ly) },
-                                onMove = { lx, ly -> apply(lx, ly) },
-                                onUp = {
-                                    if (isRight) gamepad?.setRightStickTouch(0f, 0f) else gamepad?.setLeftStick(0f, 0f)
-                                }
-                            )
-                        )
-                    }
-                }
-            }
-            else -> {
-                val index = when (btn.baseId) {
-                    "LB", "RB", "LT", "RT" -> shoulderIndex(btn.baseId, isWindowsMode)
-                    else -> buttonSpec(btn.baseId, btn.label, 0f).buttonIndex
-                }
-                if (index != null) {
-                    list.add(
-                        RuntimeControl(
-                            left, top, right, bottom,
-                            onDown = { _, _ ->
-                                pressedButtons[btn.id] = true
-                                vibrateForIntensity(vibrator, hapticIntensity)
-                                gamepad?.setButtonState(index, true)
-                            },
-                            onMove = { _, _ -> },
-                            onUp = {
-                                pressedButtons[btn.id] = false
-                                gamepad?.setButtonState(index, false)
-                            }
-                        )
-                    )
-                }
-            }
+        val rect = floatArrayOf(left, top, cx + btnPx / 2f, cy + btnPx / 2f)
+        val control = when {
+            btn.isStick && btn.floating -> floatingStickControl(btn, rect, env)
+            btn.isStick -> stickControl(btn, rect, btnPx, env)
+            btn.baseId == "DPAD" -> dpadControl(btn, rect, btnPx, env)
+            btn.baseId == "TPADD" -> touchDpadControl(btn, rect, btnPx, env)
+            btn.baseId == "TPADL" || btn.baseId == "TPADR" -> touchStickControl(btn, rect, btnPx, env)
+            btn.isPressable -> pressControl(btn, rect, env)
+            else -> null
         }
+        control?.let { list.add(it) }
     }
     // Hit-testing picks the first match, so smaller controls go first: a small button overlapping a
     // stick/d-pad claims the touch, not the larger control beneath it.
     list.sortBy { it.area }
     return list
+}
+
+private fun holdStick(env: ControlEnv, id: String, isRight: Boolean, x: Float, y: Float) {
+    val hold = StickHold(isRight, x, y)
+    env.stickHolds[id] = hold
+    sendHeldStick(env, isRight, hold)
+}
+
+private fun releaseStick(env: ControlEnv, id: String, isRight: Boolean) {
+    env.stickHolds.remove(id)
+    sendHeldStick(env, isRight, null)
+}
+
+// A (near-)centred copy never overrides another copy of the same stick that is still deflected.
+private fun sendHeldStick(env: ControlEnv, isRight: Boolean, latest: StickHold?) {
+    fun StickHold.deflected() = abs(x) > 0.1f || abs(y) > 0.1f
+    val sameStick = env.stickHolds.values.filter { it.isRight == isRight }
+    val active = latest?.takeIf { it.deflected() }
+        ?: sameStick.lastOrNull { it.deflected() }
+        ?: latest
+        ?: sameStick.lastOrNull()
+    sendStick(env, isRight, active?.x ?: 0f, active?.y ?: 0f)
+}
+
+private fun sendStick(env: ControlEnv, isRight: Boolean, x: Float, y: Float) {
+    if (isRight) env.gamepad?.setRightStickTouch(x, y) else env.gamepad?.setLeftStick(x, y)
+}
+
+private fun stickControl(btn: ButtonConfig, r: FloatArray, btnPx: Float, env: ControlEnv): RuntimeControl {
+    val isRight = btn.baseId == "RSTICK"
+    val radius = btnPx / 2f
+    val maxOffset = (btnPx - btnPx * 0.4f) / 2f  // knob is 0.4 of base
+    fun apply(localX: Float, localY: Float) {
+        // Absolute position from centre, vector clamped to the rim: a finger outside the circle pins
+        // to the rim and stays there until it crosses back, rather than jumping to the opposite side.
+        var ox = localX - radius
+        var oy = localY - radius
+        val dist = sqrt(ox * ox + oy * oy)
+        if (dist > maxOffset && dist > 0f) {
+            ox = ox / dist * maxOffset
+            oy = oy / dist * maxOffset
+        }
+        env.stickOffsets[btn.id] = Offset(ox, oy)
+        val nx = if (maxOffset > 0f) (ox / maxOffset).coerceIn(-1f, 1f) else 0f
+        val ny = if (maxOffset > 0f) (oy / maxOffset).coerceIn(-1f, 1f) else 0f
+        holdStick(env, btn.id, isRight, nx, ny)
+    }
+    return RuntimeControl(
+        r[0], r[1], r[2], r[3],
+        onDown = { lx, ly -> apply(lx, ly) },
+        onMove = { lx, ly -> apply(lx, ly) },
+        onUp = {
+            env.stickOffsets[btn.id] = Offset.Zero
+            releaseStick(env, btn.id, isRight)
+        }
+    )
+}
+
+private fun floatingStickControl(btn: ButtonConfig, r: FloatArray, env: ControlEnv): RuntimeControl {
+    val isRight = btn.baseId == "RSTICK"
+    val stickPx = FLOATING_STICK_FRAC * env.dim
+    val maxOffset = stickPx * 0.3f
+    var originX = 0f
+    var originY = 0f
+    fun apply(localX: Float, localY: Float) {
+        var ox = localX - originX
+        var oy = localY - originY
+        val dist = sqrt(ox * ox + oy * oy)
+        if (dist > maxOffset && dist > 0f) {
+            ox = ox / dist * maxOffset
+            oy = oy / dist * maxOffset
+        }
+        env.stickOffsets[btn.id] = Offset(ox, oy)
+        val nx = if (maxOffset > 0f) (ox / maxOffset).coerceIn(-1f, 1f) else 0f
+        val ny = if (maxOffset > 0f) (oy / maxOffset).coerceIn(-1f, 1f) else 0f
+        holdStick(env, btn.id, isRight, nx, ny)
+    }
+    return RuntimeControl(
+        r[0], r[1], r[2], r[3],
+        onDown = { lx, ly ->
+            originX = lx
+            originY = ly
+            env.stickOrigins[btn.id] = Offset(lx, ly)
+            apply(lx, ly)
+        },
+        onMove = { lx, ly -> apply(lx, ly) },
+        onUp = {
+            env.stickOrigins.remove(btn.id)
+            env.stickOffsets[btn.id] = Offset.Zero
+            releaseStick(env, btn.id, isRight)
+        }
+    )
+}
+
+private fun dpadDirection(dx: Float, dy: Float, dead: Float): DpadState = DpadState(
+    h = when { dx > dead -> DpadDir.RIGHT; dx < -dead -> DpadDir.LEFT; else -> null },
+    v = when { dy < -dead -> DpadDir.UP; dy > dead -> DpadDir.DOWN; else -> null }
+)
+
+private fun applyDpad(btn: ButtonConfig, next: DpadState, env: ControlEnv) {
+    val prev = env.dpadDirs[btn.id]
+    if (prev != null && prev.h == next.h && prev.v == next.v) return
+    val isNewPress = (next.h != null && next.h != prev?.h) || (next.v != null && next.v != prev?.v)
+    if (isNewPress) env.haptic()
+    env.dpadDirs[btn.id] = next
+    sendEffectiveDpad(next, env)
+}
+
+private fun releaseDpad(btn: ButtonConfig, env: ControlEnv) {
+    val neutral = DpadState(null, null)
+    env.dpadDirs[btn.id] = neutral
+    sendEffectiveDpad(neutral, env)
+}
+
+// D-pad controls share one hat: each axis comes from whichever control is holding it.
+private fun sendEffectiveDpad(state: DpadState, env: ControlEnv) {
+    val held = env.dpadDirs.values
+    val h = state.h ?: held.firstNotNullOfOrNull { it.h }
+    val v = state.v ?: held.firstNotNullOfOrNull { it.v }
+    sendDpad(env.gamepad, env.isWindowsMode, h, v)
+}
+
+private fun dpadControl(btn: ButtonConfig, r: FloatArray, btnPx: Float, env: ControlEnv): RuntimeControl {
+    val radius = btnPx / 2f
+    val dead = radius * 0.25f
+    return RuntimeControl(
+        r[0], r[1], r[2], r[3],
+        onDown = { lx, ly -> applyDpad(btn, dpadDirection(lx - radius, ly - radius, dead), env) },
+        onMove = { lx, ly -> applyDpad(btn, dpadDirection(lx - radius, ly - radius, dead), env) },
+        onUp = { releaseDpad(btn, env) }
+    )
+}
+
+// Touchpad in d-pad mode: 8-way direction from where the finger first lands, so the initial touch
+// sets the origin and dragging away from it picks a direction.
+private fun touchDpadControl(btn: ButtonConfig, r: FloatArray, btnPx: Float, env: ControlEnv): RuntimeControl {
+    var originX = 0f
+    var originY = 0f
+    val dead = btnPx * 0.12f
+    return RuntimeControl(
+        r[0], r[1], r[2], r[3],
+        onDown = { lx, ly ->
+            originX = lx
+            originY = ly
+            applyDpad(btn, dpadDirection(0f, 0f, dead), env)
+        },
+        onMove = { lx, ly -> applyDpad(btn, dpadDirection(lx - originX, ly - originY, dead), env) },
+        onUp = { releaseDpad(btn, env) }
+    )
+}
+
+// Touchpad in stick mode (trackpad style): the stick value is the offset from where the finger first
+// landed, so the same drag gives the same deflection wherever it started.
+private fun touchStickControl(btn: ButtonConfig, r: FloatArray, btnPx: Float, env: ControlEnv): RuntimeControl {
+    val isRight = btn.baseId == "TPADR"
+    // Full deflection when dragged ~40% of the pad width from the origin.
+    val range = btnPx * 0.4f
+    var originX = 0f
+    var originY = 0f
+    fun apply(localX: Float, localY: Float) {
+        val nx = if (range > 0f) ((localX - originX) / range).coerceIn(-1f, 1f) else 0f
+        val ny = if (range > 0f) ((localY - originY) / range).coerceIn(-1f, 1f) else 0f
+        holdStick(env, btn.id, isRight, nx, ny)
+    }
+    return RuntimeControl(
+        r[0], r[1], r[2], r[3],
+        onDown = { lx, ly -> originX = lx; originY = ly; apply(lx, ly) },
+        onMove = { lx, ly -> apply(lx, ly) },
+        onUp = { releaseStick(env, btn.id, isRight) }
+    )
+}
+
+// "active" is held or latched by the user; "engaged" is the HID state, which turbo flips while active.
+private fun pressControl(btn: ButtonConfig, r: FloatArray, env: ControlEnv): RuntimeControl {
+    val indices = (if (btn.baseId == "MACRO") btn.macro else listOf(btn.baseId))
+        .mapNotNull { hidIndex(it, env.isWindowsMode) }
+    val halfPeriodMs = 500L / btn.turboHz
+    var engaged = false
+    var active = false
+
+    fun engage(on: Boolean) {
+        if (on == engaged) return
+        engaged = on
+        indices.forEach { if (on) env.mixer.press(it) else env.mixer.release(it) }
+    }
+
+    fun setActive(on: Boolean) {
+        if (on == active) return
+        active = on
+        env.pressedButtons[btn.id] = on
+        if (btn.gyroGate) env.onGateHold(on)
+    }
+
+    val pulse = object : Runnable {
+        override fun run() {
+            engage(!engaged)
+            env.handler.postDelayed(this, halfPeriodMs)
+        }
+    }
+
+    fun release() {
+        env.handler.removeCallbacks(pulse)
+        engage(false)
+        setActive(false)
+    }
+
+    fun hold() {
+        env.haptic()
+        setActive(true)
+        engage(true)
+    }
+
+    return when (btn.behavior) {
+        ButtonBehavior.NORMAL -> RuntimeControl(
+            r[0], r[1], r[2], r[3],
+            onDown = { _, _ -> hold() },
+            onMove = { _, _ -> },
+            onUp = { release() }
+        )
+        ButtonBehavior.TOGGLE -> RuntimeControl(
+            r[0], r[1], r[2], r[3],
+            onDown = { _, _ -> if (active) { env.haptic(); release() } else hold() },
+            onMove = { _, _ -> },
+            onUp = {},
+            onReset = { release() },
+            freshDownOnly = true
+        )
+        ButtonBehavior.TURBO -> RuntimeControl(
+            r[0], r[1], r[2], r[3],
+            onDown = { _, _ ->
+                hold()
+                env.handler.postDelayed(pulse, halfPeriodMs)
+            },
+            onMove = { _, _ -> },
+            onUp = { release() }
+        )
+    }
 }
 
 private fun sendDpad(gamepad: BluetoothHidGamepad?, isWindowsMode: Boolean, h: DpadDir?, v: DpadDir?) {
@@ -498,54 +781,78 @@ private fun sendDpad(gamepad: BluetoothHidGamepad?, isWindowsMode: Boolean, h: D
 }
 
 @Composable
-private fun ButtonVisual(spec: ButtonSpec, size: Dp, pressed: Boolean) {
-    val bgColor = if (pressed) spec.color.copy(alpha = 0.6f) else spec.color
+private fun ButtonVisual(btn: ButtonConfig, size: Dp, pressed: Boolean, oled: Boolean) {
     val scale by animateFloatAsState(
         targetValue = if (pressed) 0.88f else 1f,
         animationSpec = tween(durationMillis = if (pressed) 60 else 120),
         label = "btnScale"
     )
-    Box(
-        modifier = Modifier
-            .size(size)
-            .scale(scale)
-            .background(bgColor, spec.shape),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = spec.label,
-            fontSize = spec.fontSize.sp,
-            fontWeight = FontWeight.Bold,
-            color = ControllerOnBtn,
-            maxLines = 1,
-            softWrap = false
-        )
+    Box(modifier = Modifier.size(size).scale(scale), contentAlignment = Alignment.Center) {
+        ButtonFace(btn, size, pressed, oled)
     }
 }
 
 @Composable
-private fun StickVisual(size: Dp, label: String, offset: Offset) {
+private fun StickVisual(size: Dp, label: String, offset: Offset, oled: Boolean) {
     val knobSize = size * 0.4f
     Box(
         modifier = Modifier
             .size(size)
-            .background(StickBase, CircleShape),
+            .then(
+                if (oled) Modifier.border(2.dp, OledDim, CircleShape)
+                else Modifier.background(StickBase, CircleShape)
+            ),
         contentAlignment = Alignment.Center
     ) {
         if (label.isNotEmpty()) {
-            Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = StickLabel)
+            Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (oled) OledDim else StickLabel)
         }
         Box(
             modifier = Modifier
                 .size(knobSize)
                 .offset { IntOffset(offset.x.roundToInt(), offset.y.roundToInt()) }
-                .background(StickKnob, CircleShape)
+                .then(
+                    if (oled) Modifier.border(2.dp, OledBright, CircleShape)
+                    else Modifier.background(StickKnob, CircleShape)
+                )
         )
     }
 }
 
 @Composable
-private fun DpadVisual(dir: DpadState?, size: Dp) {
+private fun FloatingStickVisual(
+    zoneSize: Dp,
+    stickPx: Float,
+    density: Float,
+    label: String,
+    origin: Offset?,
+    offset: Offset,
+    oled: Boolean
+) {
+    val line = if (oled) OledDim else StickKnob.copy(alpha = 0.25f)
+    Box(
+        modifier = Modifier
+            .size(zoneSize)
+            .border(1.5.dp, line, RoundedCornerShape(20.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        if (origin == null) {
+            Text(label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (oled) OledDim else StickLabel)
+        } else {
+            val half = stickPx / 2f
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset { IntOffset((origin.x - half).roundToInt(), (origin.y - half).roundToInt()) }
+            ) {
+                StickVisual(size = (stickPx / density).dp, label = "", offset = offset, oled = oled)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DpadVisual(dir: DpadState?, size: Dp, oled: Boolean) {
     val arms = listOf(
         DpadDir.UP    to Alignment.TopCenter,
         DpadDir.DOWN  to Alignment.BottomCenter,
@@ -559,7 +866,12 @@ private fun DpadVisual(dir: DpadState?, size: Dp) {
     val inset = size * 0.065f
     Box(modifier = Modifier.size(size), contentAlignment = Alignment.Center) {
         arms.forEach { (d, anchor) ->
-            val tint = if (d == h || d == v) DpadPressed else DpadNormal
+            val held = d == h || d == v
+            val tint = when {
+                oled -> if (held) OledBright else OledDim
+                held -> DpadPressed
+                else -> DpadNormal
+            }
             val offsetMod = when (d) {
                 DpadDir.UP    -> Modifier.offset(y = inset)
                 DpadDir.DOWN  -> Modifier.offset(y = -inset)
@@ -578,21 +890,24 @@ private fun DpadVisual(dir: DpadState?, size: Dp) {
     }
 }
 
-// Touchpad: a plain surface. No moving knob — like a laptop trackpad, where you first touch is the
-// origin for that touch. D-pad mode lights the border while a direction is held.
+// Touchpad: a plain surface with no knob; d-pad mode lights the border while a direction is held.
 @Composable
-private fun TouchpadVisual(size: Dp, mode: String, dir: DpadState?) {
+private fun TouchpadVisual(size: Dp, mode: String, dir: DpadState?, oled: Boolean) {
     val label = when (mode) { "TPADL" -> "L"; "TPADR" -> "R"; else -> "+" }
     val active = mode == "TPADD" && (dir?.h != null || dir?.v != null)
-    val border = if (active) DpadPressed.copy(alpha = 0.5f) else StickKnob.copy(alpha = 0.4f)
+    val border = when {
+        oled -> if (active) OledBright else OledDim
+        active -> DpadPressed.copy(alpha = 0.5f)
+        else -> StickKnob.copy(alpha = 0.4f)
+    }
     Box(
         modifier = Modifier
             .size(size)
-            .background(StickBase.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+            .background(if (oled) Color.Transparent else StickBase.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
             .border(1.5.dp, border, RoundedCornerShape(14.dp)),
         contentAlignment = Alignment.Center
     ) {
-        Text(label, fontSize = (size.value * 0.16f).sp, fontWeight = FontWeight.Bold, color = StickLabel)
+        Text(label, fontSize = (size.value * 0.16f).sp, fontWeight = FontWeight.Bold, color = if (oled) OledDim else StickLabel)
     }
 }
 

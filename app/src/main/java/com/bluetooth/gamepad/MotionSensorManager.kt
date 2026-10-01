@@ -28,15 +28,13 @@ class MotionSensorManager(private val context: Context) {
     private val accelSensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
     private val rotationSensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
 
-    val isSupported: Boolean get() = gyroSensor != null
-
     fun isModeAvailable(mode: MotionMode): Boolean = when (mode) {
         MotionMode.AIM -> gyroSensor != null
         MotionMode.STEERING -> rotationSensor != null
     }
 
     // Invoked on the sensor thread.
-    var onMotion: ((x: Float, y: Float) -> Unit)? = null
+    @Volatile var onMotion: ((x: Float, y: Float) -> Unit)? = null
 
     // Tunables are written from the main thread (updateTuning) and read on the sensor thread.
     private var mode = MotionMode.AIM
@@ -62,6 +60,8 @@ class MotionSensorManager(private val context: Context) {
     private var wasActive = false
 
     private var steeringCenter: Float? = null
+    // Set from the main thread, applied on the sensor thread so it never races a sample in progress.
+    @Volatile private var recenterRequested = false
 
     private var lastGyroTsNs = 0L
     private var sensorThread: HandlerThread? = null
@@ -88,6 +88,15 @@ class MotionSensorManager(private val context: Context) {
     private val listener = object : SensorEventListener {
         override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
         override fun onSensorChanged(event: SensorEvent) {
+            if (recenterRequested) {
+                recenterRequested = false
+                posX = 0f; posY = 0f
+                lastSentX = 0f; lastSentY = 0f
+                wasActive = false
+                steeringCenter = null
+                // Emitted here so it lands after any sample computed before the request.
+                onMotion?.invoke(0f, 0f)
+            }
             when (event.sensor.type) {
                 Sensor.TYPE_ACCELEROMETER -> handleAccel(event)
                 Sensor.TYPE_GYROSCOPE -> if (mode == MotionMode.AIM) emit(aimValues(event))
@@ -305,9 +314,9 @@ class MotionSensorManager(private val context: Context) {
         this.invertY = invertY
     }
 
+    // Re-zeroes aim and the steering centre; gyro bias and gravity calibration are kept.
     fun recenter() {
-        reset()
-        onMotion?.invoke(0f, 0f)
+        recenterRequested = true
     }
 
     fun stop() {

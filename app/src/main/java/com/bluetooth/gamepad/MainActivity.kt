@@ -1,5 +1,6 @@
 package com.bluetooth.gamepad
 
+import android.app.ActivityManager
 import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
@@ -77,6 +78,9 @@ class MainActivity : ComponentActivity() {
     private val previewLayout = mutableStateOf<ControllerLayout?>(null)
     private val layoutsRefreshKey = mutableStateOf(0)
     private val autoReconnect = mutableStateOf(true)
+    private val oledMode = mutableStateOf(false)
+    private val blockEdgeGestures = mutableStateOf(true)
+    private val pinScreen = mutableStateOf(false)
 
     private var gamepad: BluetoothHidGamepad? = null
     private var userCancelledConnect = false
@@ -136,6 +140,9 @@ class MainActivity : ComponentActivity() {
         motionInvertX.value = prefs.getBoolean("motionInvertX", false)
         motionInvertY.value = prefs.getBoolean("motionInvertY", false)
         autoReconnect.value = prefs.getBoolean("autoReconnect", true)
+        oledMode.value = prefs.getBoolean("oledMode", false)
+        blockEdgeGestures.value = prefs.getBoolean("blockEdgeGestures", true)
+        pinScreen.value = prefs.getBoolean("pinScreen", false)
 
         // Bond state changes are sent by the Bluetooth system — must be EXPORTED
         androidx.core.content.ContextCompat.registerReceiver(
@@ -148,7 +155,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             BtGamepadTheme(appTheme = appTheme.value) {
                 val isFullScreen = controllerVisible.value || editingLayout.value != null
-                androidx.compose.runtime.LaunchedEffect(isFullScreen, controllerVisible.value) {
+                androidx.compose.runtime.LaunchedEffect(isFullScreen, controllerVisible.value, pinScreen.value) {
                     requestedOrientation = if (isFullScreen)
                         ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                     else
@@ -165,6 +172,12 @@ class MainActivity : ComponentActivity() {
                         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     else
                         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    val pinned = getSystemService(ActivityManager::class.java).lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
+                    val wantPinned = controllerVisible.value && pinScreen.value
+                    try {
+                        if (wantPinned && !pinned) startLockTask()
+                        if (!wantPinned && pinned) stopLockTask()
+                    } catch (_: Exception) {}
                 }
 
                 if (controllerVisible.value) {
@@ -172,20 +185,33 @@ class MainActivity : ComponentActivity() {
                         controllerVisible.value = false
                         previewLayout.value = null
                     }
-                    BackHandler { closeController() }
+                    // Some phones deliver an edge swipe as Back despite exclusion, so Back is ignored while blocking.
+                    BackHandler { if (!blockEdgeGestures.value) closeController() }
+                    val playLayouts = androidx.compose.runtime.remember(layoutsRefreshKey.value, activeLayoutId.value) {
+                        layoutRepo.getAll()
+                    }
                     ControllerScreen(
                         gamepad = gamepad,
                         isWindowsMode = isWindowsMode.value,
                         connectedDeviceName = connectedDeviceName.value,
+                        isConnected = hidConnectionState.value == BluetoothProfile.STATE_CONNECTED,
                         layout = previewLayout.value
                             ?: layoutRepo.load(activeLayoutId.value)
                             ?: ControllerLayout.default(),
+                        // A Test preview shows unsaved edits, so switching layouts is not offered there.
+                        layouts = if (previewLayout.value == null) playLayouts else emptyList(),
+                        onLayoutSelect = { id ->
+                            activeLayoutId.value = id
+                            prefs.edit().putString("activeLayoutId", id).apply()
+                        },
                         hapticIntensity = hapticIntensity.value,
                         motionEnabled = motionEnabled.value,
                         motionMode = motionMode.value,
                         motionSensitivity = motionSensitivity.value,
                         motionInvertX = motionInvertX.value,
                         motionInvertY = motionInvertY.value,
+                        oledMode = oledMode.value,
+                        blockEdgeGestures = blockEdgeGestures.value,
                         onStopClick = closeController
                     )
                 } else if (editingLayout.value != null && editorSession.value != null) {
@@ -288,6 +314,9 @@ class MainActivity : ComponentActivity() {
                                                     motionInvertX = motionInvertX.value,
                                         motionInvertY = motionInvertY.value,
                                         autoReconnect = autoReconnect.value,
+                                        oledMode = oledMode.value,
+                                        blockEdgeGestures = blockEdgeGestures.value,
+                                        pinScreen = pinScreen.value,
                                         onThemeChange = { theme ->
                                             appTheme.value = theme
                                             prefs.edit().putString("appTheme", theme.name).apply()
@@ -324,6 +353,18 @@ class MainActivity : ComponentActivity() {
                                         onAutoReconnectChange = { value ->
                                             autoReconnect.value = value
                                             prefs.edit().putBoolean("autoReconnect", value).apply()
+                                        },
+                                        onOledModeChange = { value ->
+                                            oledMode.value = value
+                                            prefs.edit().putBoolean("oledMode", value).apply()
+                                        },
+                                        onBlockEdgeGesturesChange = { value ->
+                                            blockEdgeGestures.value = value
+                                            prefs.edit().putBoolean("blockEdgeGestures", value).apply()
+                                        },
+                                        onPinScreenChange = { value ->
+                                            pinScreen.value = value
+                                            prefs.edit().putBoolean("pinScreen", value).apply()
                                         },
                                         contentPadding = innerPadding
                                     )

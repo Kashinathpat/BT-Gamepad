@@ -16,6 +16,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Swipe
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Games
@@ -64,6 +66,9 @@ fun SettingsScreen(
     motionInvertX: Boolean,
     motionInvertY: Boolean,
     autoReconnect: Boolean,
+    oledMode: Boolean,
+    blockEdgeGestures: Boolean,
+    pinScreen: Boolean,
     onThemeChange: (AppTheme) -> Unit,
     onWindowsModeToggle: (Boolean) -> Unit,
     onHapticIntensityChange: (HapticIntensity) -> Unit,
@@ -73,6 +78,9 @@ fun SettingsScreen(
     onMotionInvertXChange: (Boolean) -> Unit,
     onMotionInvertYChange: (Boolean) -> Unit,
     onAutoReconnectChange: (Boolean) -> Unit,
+    onOledModeChange: (Boolean) -> Unit,
+    onBlockEdgeGesturesChange: (Boolean) -> Unit,
+    onPinScreenChange: (Boolean) -> Unit,
     contentPadding: PaddingValues = PaddingValues()
 ) {
     val cs = MaterialTheme.colorScheme
@@ -193,6 +201,48 @@ fun SettingsScreen(
                     sub = "Resume last device on launch",
                     checked = autoReconnect,
                     onCheckedChange = onAutoReconnectChange
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            SectionLabel("PLAY SCREEN")
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(cs.surfaceContainerLow)
+            ) {
+                SettingsRowToggle(
+                    icon = Icons.Default.DarkMode,
+                    iconBg = cs.secondaryContainer,
+                    iconFg = cs.onSecondaryContainer,
+                    title = "OLED mode",
+                    sub = "Black background with dim outline controls",
+                    checked = oledMode,
+                    onCheckedChange = onOledModeChange
+                )
+                Divider(cs.outlineVariant)
+                SettingsRowToggle(
+                    icon = Icons.Default.Swipe,
+                    iconBg = cs.tertiaryContainer,
+                    iconFg = cs.onTertiaryContainer,
+                    title = "Block edge swipes",
+                    sub = "Side swipes and Back do not leave the play screen; use the … menu",
+                    checked = blockEdgeGestures,
+                    onCheckedChange = onBlockEdgeGesturesChange
+                )
+                Divider(cs.outlineVariant)
+                SettingsRowToggle(
+                    icon = Icons.Default.PushPin,
+                    iconBg = cs.primaryContainer,
+                    iconFg = cs.onPrimaryContainer,
+                    title = "Pin screen while playing",
+                    sub = "Blocks Home and Recents with Android app pinning",
+                    checked = pinScreen,
+                    onCheckedChange = onPinScreenChange
                 )
             }
 

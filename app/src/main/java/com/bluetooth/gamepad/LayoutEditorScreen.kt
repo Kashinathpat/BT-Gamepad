@@ -18,12 +18,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -47,11 +49,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -59,6 +63,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import android.widget.Toast
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -77,6 +82,9 @@ import com.bluetooth.gamepad.ui.theme.DpadNormal
 import com.bluetooth.gamepad.ui.theme.StickBase
 import com.bluetooth.gamepad.ui.theme.StickKnob
 import kotlin.math.roundToInt
+
+private const val MIN_SIZE = 0.04f
+private const val MAX_SIZE = 0.6f
 
 private val EditorBg           = Color(0xFF0B0C0D)
 private val EditorCanvasBg     = Color(0xFF0E1012)
@@ -114,10 +122,12 @@ fun LayoutEditorScreen(
     val addOpen = remember { mutableStateOf(false) }
     val snapEnabled = remember { mutableStateOf(true) }
     val showExitDialog = remember { mutableStateOf(false) }
+    val labelUndoFor = remember { mutableStateOf<String?>(null) }
     val density = LocalDensity.current.density
     val context = LocalContext.current
 
     fun pushUndo() {
+        labelUndoFor.value = null
         if (undoStack.size >= 50) undoStack.removeAt(0)
         undoStack.add(buttons.toList())
         redoStack.clear()
@@ -126,6 +136,7 @@ fun LayoutEditorScreen(
 
     fun undo() {
         if (undoStack.isEmpty()) return
+        labelUndoFor.value = null
         redoStack.add(buttons.toList())
         val prev = undoStack.removeAt(undoStack.lastIndex)
         buttons.clear()
@@ -134,6 +145,7 @@ fun LayoutEditorScreen(
 
     fun redo() {
         if (redoStack.isEmpty()) return
+        labelUndoFor.value = null
         if (undoStack.size >= 50) undoStack.removeAt(0)
         undoStack.add(buttons.toList())
         val next = redoStack.removeAt(redoStack.lastIndex)
@@ -161,6 +173,10 @@ fun LayoutEditorScreen(
         val w = canvasSize.value.width.toFloat()
         val h = canvasSize.value.height.toFloat()
         if (w <= 0 || h <= 0) return
+        if (buttons.size >= MAX_CONTROLS) {
+            Toast.makeText(context, "A layout can have up to $MAX_CONTROLS controls", Toast.LENGTH_SHORT).show()
+            return
+        }
         pushUndo()
         // Generate a unique id: the bare template id for the first instance, then "<id>_N" for
         // duplicates. Probe for the next free suffix so deleting an earlier duplicate can never
@@ -189,7 +205,7 @@ fun LayoutEditorScreen(
         if (i >= 0) {
             pushUndo()
             val cur = buttons[i]
-            buttons[i] = cur.copy(sizeFrac = (cur.sizeFrac + delta).coerceIn(0.04f, 0.35f))
+            buttons[i] = cur.copy(sizeFrac = (cur.sizeFrac + delta).coerceIn(MIN_SIZE, MAX_SIZE))
         }
     }
 
@@ -203,6 +219,23 @@ fun LayoutEditorScreen(
                 yFrac = (cur.yFrac + dy).coerceIn(0.02f, 0.98f)
             )
         }
+    }
+
+    fun updateButton(next: ButtonConfig) {
+        val i = buttons.indexOfFirst { it.id == next.id }
+        if (i < 0 || buttons[i] == next) return
+        pushUndo()
+        buttons[i] = next
+    }
+
+    fun changeLabel(id: String, text: String) {
+        val i = buttons.indexOfFirst { it.id == id }
+        if (i < 0) return
+        if (labelUndoFor.value != id) {
+            pushUndo()
+            labelUndoFor.value = id
+        }
+        buttons[i] = buttons[i].copy(label = text)
     }
 
     // Hardware back closes an open overlay first, then prompts for unsaved edits, then exits.
@@ -219,6 +252,7 @@ fun LayoutEditorScreen(
             onSizeChanged = { canvasSize.value = it },
             onSelect = { id ->
                 selectedId.value = id
+                labelUndoFor.value = null
                 addOpen.value = false
             },
             onMove = { id, dx, dy ->
@@ -241,7 +275,7 @@ fun LayoutEditorScreen(
                 val i = buttons.indexOfFirst { it.id == id }
                 if (i >= 0) {
                     val cur = buttons[i]
-                    buttons[i] = cur.copy(sizeFrac = (cur.sizeFrac * zoom).coerceIn(0.04f, 0.35f))
+                    buttons[i] = cur.copy(sizeFrac = (cur.sizeFrac * zoom).coerceIn(MIN_SIZE, MAX_SIZE))
                 }
             },
             onMoveStart = { pushUndo() },
@@ -293,6 +327,8 @@ fun LayoutEditorScreen(
                 onClose = { selectedId.value = null },
                 onSizeChange = { delta -> changeSize(sel.id, delta) },
                 onPositionChange = { dx, dy -> changePosition(sel.id, dx, dy) },
+                onUpdate = { updateButton(it) },
+                onLabelChange = { changeLabel(sel.id, it) },
                 onDelete = { deleteElement(sel.id) }
             )
         }
@@ -579,6 +615,7 @@ private fun EditorCanvas(
                     modifier = Modifier
                         .offset { IntOffset(topLeftX, topLeftY) }
                         .size(btnDp)
+                        .alpha(btn.opacity)
                         .then(if (isSelected) Modifier.border(2.dp, EditorSelection, CircleShape) else Modifier)
                         .pointerInput(btn.id) {
                             detectTransformGestures(panZoomLock = false) { _, pan, zoom, _ ->
@@ -591,20 +628,16 @@ private fun EditorCanvas(
                                 if (zoom != 1f) onScale(btn.id, zoom)
                                 if (pan.x != 0f || pan.y != 0f) onMove(btn.id, pan.x, pan.y)
                             }
-                            // Gesture finished — snap the final resting position to the grid (if on),
-                            // then arm the next gesture for its own undo entry. Snapping per-frame
-                            // instead would fight small drags and feel stuck.
-                            if (gesturePushed.value) {
-                                onMoveEnd(btn.id)
-                                gesturePushed.value = false
-                            }
                         }
                         .pointerInput(btn.id + "_tap") {
                             awaitPointerEventScope {
                                 while (true) {
                                     val e = awaitPointerEvent()
-                                    if (e.changes.any { it.pressed && !it.previousPressed }) {
-                                        onSelect(btn.id)
+                                    if (e.changes.any { it.pressed && !it.previousPressed }) onSelect(btn.id)
+                                    // detectTransformGestures never returns, so the gesture's end is
+                                    // detected here: snap once when the last finger lifts.
+                                    if (gesturePushed.value && e.changes.none { it.pressed }) {
+                                        onMoveEnd(btn.id)
                                         gesturePushed.value = false
                                     }
                                 }
@@ -649,6 +682,7 @@ private val paletteItems = listOf(
     PaletteItem(ButtonConfig("RSB",    "RSB",    0.5f, 0.5f, 0.08f), "Stick click R", "RSB", Color(0xFF252A27),       Color.White),
     PaletteItem(ButtonConfig("SELECT", "SELECT", 0.5f, 0.5f, 0.08f), "Select",        "SEL", Color(0xFF252A27),       Color.White),
     PaletteItem(ButtonConfig("START",  "START",  0.5f, 0.5f, 0.08f), "Start",         "STA", Color(0xFF252A27),       Color.White),
+    PaletteItem(ButtonConfig("MACRO",  "A+B",    0.5f, 0.5f, 0.12f, macro = listOf("A", "B")), "Macro", "M+", MacroColor, Color.White),
 )
 
 // A glass overlay panel that floats over the canvas and can be dragged by its header. The drag
@@ -759,11 +793,14 @@ private fun BoxScope.InspectorPanel(
     onClose: () -> Unit,
     onSizeChange: (Float) -> Unit,
     onPositionChange: (Float, Float) -> Unit,
+    onUpdate: (ButtonConfig) -> Unit,
+    onLabelChange: (String) -> Unit,
     onDelete: () -> Unit
 ) {
     val (badgeColor, badgeOn) = btnBadgeColors(button.id)
+    val maxBody = with(LocalDensity.current) { (containerSize.height.toDp() - 70.dp).coerceAtLeast(120.dp) }
     DraggablePanel(
-        width = 188.dp,
+        width = 220.dp,
         initialAlignment = Alignment.TopEnd,
         containerSize = containerSize,
         header = { dragModifier ->
@@ -790,7 +827,10 @@ private fun BoxScope.InspectorPanel(
     ) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(EditorGlassBorder))
         Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+            modifier = Modifier
+                .heightIn(max = maxBody)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 10.dp, vertical = 9.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Size: label + [−] value [+] on one compact row.
@@ -819,6 +859,55 @@ private fun BoxScope.InspectorPanel(
                     modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
                 MiniBtn("+") { onPositionChange(0f, 0.02f) }
             }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                PanelLabel("Opacity", Modifier.weight(1f))
+                MiniBtn("−") { onUpdate(button.copy(opacity = stepOpacity(button.opacity, -0.1f))) }
+                Text("${(button.opacity * 100).roundToInt()}%",
+                    fontSize = 11.sp, fontWeight = FontWeight.Bold, color = EditorPrimary,
+                    modifier = Modifier.widthIn(min = 34.dp), textAlign = TextAlign.Center)
+                MiniBtn("+") { onUpdate(button.copy(opacity = stepOpacity(button.opacity, 0.1f))) }
+            }
+
+            if (button.isStick) {
+                ToggleRow("Floating", button.floating) { onUpdate(button.copy(floating = !button.floating)) }
+            }
+
+            if (button.isPressable) {
+                PanelLabel("Label")
+                LabelField(button.label, onLabelChange)
+
+                PanelLabel("Shape")
+                val shape = button.shape ?: defaultShape(button.baseId)
+                ChipGrid(ControlShape.entries, perRow = 2) { s, mod ->
+                    Chip(s.title, shape == s, mod) { onUpdate(button.copy(shape = s)) }
+                }
+
+                PanelLabel("Behaviour")
+                ChipGrid(ButtonBehavior.entries, perRow = 3) { b, mod ->
+                    Chip(b.title, button.behavior == b, mod) { onUpdate(button.copy(behavior = b)) }
+                }
+                if (button.behavior == ButtonBehavior.TURBO) {
+                    ChipGrid(TURBO_RATES, perRow = 3) { hz, mod ->
+                        Chip("$hz Hz", button.turboHz == hz, mod) { onUpdate(button.copy(turboHz = hz)) }
+                    }
+                }
+
+                ToggleRow("Hold for gyro", button.gyroGate) { onUpdate(button.copy(gyroGate = !button.gyroGate)) }
+
+                if (button.baseId == "MACRO") {
+                    PanelLabel("Presses")
+                    ChipGrid(PRESS_IDS, perRow = 4) { id, mod ->
+                        Chip(shortName(id), id in button.macro, mod) {
+                            val next = PRESS_IDS.filter { (it == id) != (it in button.macro) }
+                            if (next.isNotEmpty()) {
+                                val autoLabel = button.label == macroLabel(button.macro)
+                                onUpdate(button.copy(macro = next, label = if (autoLabel) macroLabel(next) else button.label))
+                            }
+                        }
+                    }
+                }
+            }
+
             // Delete (icon-led, compact).
             Box(
                 modifier = Modifier
@@ -835,6 +924,64 @@ private fun BoxScope.InspectorPanel(
             }
         }
     }
+}
+
+private fun stepOpacity(current: Float, delta: Float): Float =
+    (((current + delta) * 10).roundToInt() / 10f).coerceIn(MIN_OPACITY, 1f)
+
+private fun shortName(id: String): String = when (id) { "SELECT" -> "SEL"; "START" -> "STA"; else -> id }
+
+private fun macroLabel(targets: List<String>): String = targets.joinToString("+") { shortName(it) }.take(MAX_LABEL_LENGTH)
+
+@Composable
+private fun <T> ChipGrid(items: List<T>, perRow: Int, chip: @Composable (T, Modifier) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        items.chunked(perRow).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                row.forEach { chip(it, Modifier.weight(1f)) }
+                repeat(perRow - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Chip(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        modifier = modifier
+            .height(26.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) EditorPrimary else EditorGlassFill)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+            color = if (selected) EditorOnPrimary else EditorGlassOn, maxLines = 1)
+    }
+}
+
+@Composable
+private fun ToggleRow(label: String, checked: Boolean, onToggle: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        PanelLabel(label, Modifier.weight(1f))
+        Chip(if (checked) "On" else "Off", checked, Modifier.width(52.dp), onToggle)
+    }
+}
+
+@Composable
+private fun LabelField(value: String, onChange: (String) -> Unit) {
+    BasicTextField(
+        value = value,
+        onValueChange = { onChange(it.take(MAX_LABEL_LENGTH)) },
+        singleLine = true,
+        textStyle = TextStyle(color = EditorGlassOn, fontSize = 12.sp, fontWeight = FontWeight.Bold),
+        cursorBrush = SolidColor(EditorPrimary),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(EditorGlassFill)
+            .padding(horizontal = 8.dp, vertical = 7.dp)
+    )
 }
 
 @Composable
@@ -927,8 +1074,28 @@ private fun BoxScope.AddPanel(onAdd: (ButtonConfig) -> Unit, onClose: () -> Unit
 
 @Composable
 private fun EditorButtonVisual(btn: ButtonConfig, sizeDp: Float) {
+    if (btn.isPressable) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            ButtonFace(btn, sizeDp.dp, pressed = false, oled = false)
+        }
+        return
+    }
     when (val base = btn.baseId) {
-        "LSTICK", "RSTICK" -> {
+        "LSTICK", "RSTICK" -> if (btn.floating) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .border(1.5.dp, StickKnob.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("FLOAT", fontSize = (sizeDp * 0.1f).sp, fontWeight = FontWeight.Bold,
+                        color = Color.White.copy(alpha = 0.45f))
+                    Text(if (base == "LSTICK") "L" else "R", fontSize = (sizeDp * 0.2f).sp,
+                        fontWeight = FontWeight.Bold, color = Color(0xFF9DC9E0))
+                }
+            }
+        } else {
             Box(modifier = Modifier.fillMaxSize().background(StickBase, CircleShape),
                 contentAlignment = Alignment.Center) {
                 Box(Modifier.size((sizeDp * 0.4f).dp).background(StickKnob, CircleShape))
@@ -976,32 +1143,6 @@ private fun EditorButtonVisual(btn: ButtonConfig, sizeDp: Float) {
                 }
             }
         }
-        "A"  -> EditorCircleBtn(BtnA, "A", sizeDp)
-        "B"  -> EditorCircleBtn(BtnB, "B", sizeDp)
-        "X"  -> EditorCircleBtn(BtnX, "X", sizeDp)
-        "Y"  -> EditorCircleBtn(BtnY, "Y", sizeDp)
-        "LSB", "RSB" -> EditorCircleBtn(BtnSecondary, btn.label, sizeDp, 0.22f)
-        "LB", "RB", "LT", "RT" -> {
-            val color = if (base == "LT" || base == "RT") BtnSecondary else BtnPrimary
-            Box(Modifier.fillMaxSize().background(color, RoundedCornerShape(8.dp)), Alignment.Center) {
-                Text(btn.label, fontSize = (sizeDp * 0.28f).sp, fontWeight = FontWeight.Bold, color = Color.White)
-            }
-        }
-        "SELECT", "START" -> {
-            Box(Modifier.fillMaxSize().background(BtnSecondary, RoundedCornerShape(50)), Alignment.Center) {
-                Text(btn.label, fontSize = (sizeDp * 0.18f).sp, fontWeight = FontWeight.Bold,
-                    color = Color.White, maxLines = 1, softWrap = false)
-            }
-        }
-        else -> EditorCircleBtn(BtnPrimary, btn.label, sizeDp)
-    }
-}
-
-@Composable
-private fun EditorCircleBtn(color: Color, label: String, sizeDp: Float, fontScale: Float = 0.28f) {
-    Box(Modifier.fillMaxSize().background(color, CircleShape), Alignment.Center) {
-        Text(label, fontSize = (sizeDp * fontScale).sp, fontWeight = FontWeight.Bold,
-            color = Color.White, maxLines = 1, softWrap = false)
     }
 }
 
@@ -1019,6 +1160,7 @@ private fun btnDisplayName(id: String): String = when (id.baseButtonId()) {
     "LT"     -> "LT trigger";    "RT"     -> "RT trigger"
     "LSB"    -> "L stick click"; "RSB"    -> "R stick click"
     "SELECT" -> "Select";         "START"  -> "Start"
+    "MACRO"  -> "Macro"
     else           -> id
 }
 
@@ -1032,5 +1174,6 @@ private fun btnBadgeColors(id: String): Pair<Color, Color> = when (id.baseButton
     "DPAD"   -> Color(0xFF2D4A3E) to Color(0xFF7FDCC4)
     "LB", "RB"  -> BtnPrimary  to Color.White
     "LT", "RT"  -> BtnSecondary to Color.White
+    "MACRO"  -> MacroColor to Color.White
     else -> Color(0xFF252A27) to Color.White
 }
