@@ -13,6 +13,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
+import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
 import java.util.concurrent.ExecutorService
@@ -20,6 +22,8 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 class BluetoothHidGamepad(context: Context) {
 
@@ -30,10 +34,10 @@ class BluetoothHidGamepad(context: Context) {
     companion object {
         private const val TAG = "BtHidGamepad"
 
-        // Retry a report that the interrupt channel rejected (returned false) because it was busy.
-        // Fast back-to-back reports (like a quick tap's down then up) can overflow the BT buffer.
         private const val SEND_RETRY_LIMIT = 20
         private const val SEND_RETRY_DELAY_MS = 2L
+        // The link delivered about one report per 18 ms in testing; faster stick updates only queue up stale.
+        private const val MIN_STICK_GAP_MS = 16L
         private const val REGISTER_RETRY_LIMIT = 20
         private const val REGISTER_RETRY_DELAY_MS = 300L
         private const val STOP_DISCONNECT_TIMEOUT_MS = 3000L
@@ -198,16 +202,19 @@ class BluetoothHidGamepad(context: Context) {
     private val report = ByteArray(6)
     private val reportLock = Any()
 
-    // Last report snapshot handed to the executor, guarded by reportLock. Used to drop only
-    // *duplicate consecutive* states (e.g. a stick repeating the same value), while still queuing
-    // every genuine change. Buttons are edges, not levels: a fast tap (press then release before
-    // the previous send completes) must transmit both the pressed and released frames, so we
-    // snapshot at enqueue time rather than letting one in-flight task re-read the latest report.
+    // Last state queued, guarded by reportLock; identical consecutive states are skipped.
     private var lastEnqueued: ByteArray? = null
 
-    // Callbacks must not share the send executor: a retry backlog would delay the disconnect callback.
+    // Reports not yet handed to the stack, guarded by sendLock. Consecutive stick-only changes collapse into
+    // the newest entry; a button change always gets its own entry so no press or release is lost.
+    private val pending = ArrayDeque<ByteArray>()
+    private val sendLock = ReentrantLock()
+    private val sendReady = sendLock.newCondition()
+    private var lastSent: ByteArray? = null
+    private var lastSentAt = 0L
+    private var sender: Thread? = null
+
     private val callbackExecutor: ExecutorService = newExecutor()
-    private var sendExecutor: ExecutorService = newExecutor()
 
     // Makes queued sends abandon instead of burning 40 ms of retries each while the link goes down.
     @Volatile
@@ -319,13 +326,13 @@ class BluetoothHidGamepad(context: Context) {
     }
 
     fun start(): Boolean {
-        if (sendExecutor.isShutdown) sendExecutor = newExecutor()
         current = this
         stopping = false
         sendsSuppressed = false
         registerAttempts.set(0)
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
         bluetoothAdapter = manager?.adapter ?: return false
+        if (sender == null) startSender()
         ownDeviceName = try {
             bluetoothAdapter?.name ?: "Unknown"
         } catch (_: SecurityException) {
@@ -598,36 +605,62 @@ class BluetoothHidGamepad(context: Context) {
         if (lastEnqueued != null && report.contentEquals(lastEnqueued)) return
         val snapshot = report.clone()
         lastEnqueued = snapshot
-        try {
-            sendExecutor.submit {
-                if (sendsSuppressed) return@submit
-                val device = connectedDevice ?: return@submit
-                val hid = hidDevice ?: return@submit
-                try {
-                    // sendReport returns false when the interrupt channel is momentarily busy and
-                    // the report was NOT transmitted. Ignoring that silently drops frames — during a
-                    // fast tap the pressed frame can be lost while the following released frame
-                    // succeeds, so the host never sees the press. Retry briefly so the frame lands.
-                    var success = false
-                    var attempts = 0
-                    while (!success && attempts < SEND_RETRY_LIMIT && !sendsSuppressed) {
-                        success = hid.sendReport(device, 0, snapshot)
-                        if (!success) {
-                            try {
-                                Thread.sleep(SEND_RETRY_DELAY_MS)
-                            } catch (_: InterruptedException) {
-                                Thread.currentThread().interrupt()
-                                return@submit
-                            }
-                            attempts++
-                        }
-                    }
-                } catch (e: SecurityException) {
-                    Log.e(TAG, "SecurityException sendReport in executor", e)
-                }
+        sendLock.withLock {
+            val tail = pending.lastOrNull()
+            if (tail != null && sameButtons(tail, snapshot)) pending[pending.lastIndex] = snapshot else pending.addLast(snapshot)
+            sendReady.signal()
+        }
+    }
+
+    private fun sameButtons(a: ByteArray, b: ByteArray) = a[0] == b[0] && a[1] == b[1]
+
+    private fun startSender() {
+        sender = Thread({
+            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY)
+            try {
+                while (true) nextReport()?.let { transmit(it) }
+            } catch (_: InterruptedException) {
             }
-        } catch (_: Exception) {
-            // Executor rejected the task (e.g. shut down mid-stop); nothing more to do.
+        }, "hid-send").apply { start() }
+    }
+
+    // Returns the report due now, or null after waiting; stick-only changes are paced.
+    private fun nextReport(): ByteArray? = sendLock.withLock {
+        val now = SystemClock.uptimeMillis()
+        val last = lastSent
+        val head = pending.firstOrNull()
+        if (head == null) {
+            sendReady.await()
+            return null
+        }
+        val stickOnly = last != null && sameButtons(head, last)
+        // A stick update with a button change queued behind it is stale; the later snapshot carries newer sticks.
+        if (stickOnly && pending.size > 1) {
+            pending.removeFirst()
+            return null
+        }
+        val wait = lastSentAt + MIN_STICK_GAP_MS - now
+        if (stickOnly && wait > 0) {
+            sendReady.await(wait, TimeUnit.MILLISECONDS)
+            return null
+        }
+        pending.removeFirst()
+        lastSent = head
+        lastSentAt = now
+        head
+    }
+
+    private fun transmit(snapshot: ByteArray) {
+        val device = connectedDevice ?: return
+        val hid = hidDevice ?: return
+        try {
+            // sendReport returns false while the stack is not ready; retry briefly so a press is not lost.
+            var attempts = 0
+            while (!sendsSuppressed && !hid.sendReport(device, 0, snapshot) && ++attempts < SEND_RETRY_LIMIT) {
+                Thread.sleep(SEND_RETRY_DELAY_MS)
+            }
+        } catch (e: SecurityException) {
+            Log.e(TAG, "SecurityException sendReport", e)
         }
     }
 
@@ -683,9 +716,8 @@ class BluetoothHidGamepad(context: Context) {
             hid?.let { bluetoothAdapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, it) }
             current = null
         }
-        try {
-            sendExecutor.shutdownNow()
-        } catch (_: Exception) {}
+        sender?.interrupt()
+        sender = null
         done()
     }
 

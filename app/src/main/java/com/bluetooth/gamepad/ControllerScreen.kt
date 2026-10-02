@@ -1,10 +1,12 @@
 package com.bluetooth.gamepad
 
 import android.bluetooth.BluetoothProfile
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.view.InputDevice
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -59,6 +61,7 @@ import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -186,6 +189,15 @@ fun ControllerScreen(
     val gyroOn = remember { mutableStateOf(true) }
     val motionAvailable = motionEnabled && motionManager.isModeAvailable(motionMode)
     val isConnected = connectionState == BluetoothProfile.STATE_CONNECTED
+
+    // Finger moves are otherwise held until the next frame; sticks want every touch sample as it arrives.
+    val view = LocalView.current
+    DisposableEffect(view) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) view.requestUnbufferedDispatch(InputDevice.SOURCE_CLASS_POINTER)
+        onDispose {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) view.requestUnbufferedDispatch(InputDevice.SOURCE_CLASS_NONE)
+        }
+    }
 
     // Keyed only on what changes the sensor or where it sends; tunables go through updateTuning below so
     // a slider drag does not restart the sensor thread and rerun bias calibration.
@@ -678,9 +690,9 @@ private fun applyDpad(btn: ButtonConfig, next: DpadState, env: ControlEnv) {
     val prev = env.dpadDirs[btn.id]
     if (prev != null && prev.h == next.h && prev.v == next.v) return
     val isNewPress = (next.h != null && next.h != prev?.h) || (next.v != null && next.v != prev?.v)
-    if (isNewPress) env.haptic()
     env.dpadDirs[btn.id] = next
     sendEffectiveDpad(next, env)
+    if (isNewPress) env.haptic()
 }
 
 private fun releaseDpad(btn: ButtonConfig, env: ControlEnv) {
@@ -782,9 +794,9 @@ private fun pressControl(btn: ButtonConfig, r: FloatArray, env: ControlEnv): Run
     }
 
     fun hold() {
-        env.haptic()
         setActive(true)
         engage(true)
+        env.haptic()
     }
 
     return when (btn.behavior) {
@@ -796,7 +808,7 @@ private fun pressControl(btn: ButtonConfig, r: FloatArray, env: ControlEnv): Run
         )
         ButtonBehavior.TOGGLE -> RuntimeControl(
             r[0], r[1], r[2], r[3],
-            onDown = { _, _ -> if (active) { env.haptic(); release() } else hold() },
+            onDown = { _, _ -> if (active) { release(); env.haptic() } else hold() },
             onMove = { _, _ -> },
             onUp = {},
             onReset = { release() },
