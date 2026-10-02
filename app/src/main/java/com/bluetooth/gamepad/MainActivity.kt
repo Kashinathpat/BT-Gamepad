@@ -16,6 +16,7 @@ import android.content.SharedPreferences
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Build
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.view.WindowManager
@@ -87,14 +88,48 @@ class MainActivity : ComponentActivity() {
     lateinit var prefs: SharedPreferences
     lateinit var layoutRepo: LayoutRepository
 
+    private val enableBluetoothLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) {
+            reconnectWhenOn = false
+        } else if (reconnectWhenOn && isBluetoothEnabled()) {
+            // Already on, so no STATE_ON broadcast will follow.
+            reconnectWhenOn = false
+            reconnectLastDevice()
+        }
+    }
+
+    private val notificationLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private var notificationsAsked = false
+
     private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        // Notification permission is optional — only require BT permissions for gamepad init
-        val btGranted = results.entries
-            .filter { it.key != Manifest.permission.POST_NOTIFICATIONS }
-            .all { it.value }
-        if (btGranted) initGamepad()
+        ActivityResultContracts.RequestPermission()
+    ) { allowed ->
+        if (allowed) {
+            btAccess.value = BtAccess.GRANTED
+            initGamepad()
+            requestNotificationsIfNeeded()
+        } else {
+            btAccess.value = if (isPermanentlyDenied(Manifest.permission.BLUETOOTH_CONNECT)) BtAccess.BLOCKED else BtAccess.NEEDED
+        }
+    }
+
+    private var afterPermission: (() -> Unit)? = null
+    private var pendingPermission = ""
+    private val actionPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { allowed ->
+        val action = afterPermission
+        afterPermission = null
+        when {
+            allowed -> action?.invoke()
+            isPermanentlyDenied(pendingPermission) -> {
+                Toast.makeText(this, "Allow it in app settings", Toast.LENGTH_SHORT).show()
+                openAppSettings()
+            }
+            else -> Toast.makeText(this, "Permission is needed for this", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private val bondReceiver = object : BroadcastReceiver() {
@@ -109,11 +144,30 @@ class MainActivity : ComponentActivity() {
             // Only auto-connect to a device we paired from the Pair button, not e.g. earbuds.
             if (state == BluetoothDevice.BOND_BONDED && device.address == pendingPairAddress) {
                 pendingPairAddress = null
-                gamepad?.connectDevice(device)
+                connectTo(device)
             }
         }
     }
     private var pendingPairAddress: String? = null
+
+    private val bluetoothOn = mutableStateOf(true)
+    private val btAccess = mutableStateOf(BtAccess.NEEDED)
+    private val connectingName = mutableStateOf("")
+    private var connectingDevice: BluetoothDevice? = null
+    private var switchingTo: BluetoothDevice? = null
+    // Set when the user turns Bluetooth on from the app, so the last device is resumed once it is up.
+    private var reconnectWhenOn = false
+
+    private val btStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(_context: Context, intent: Intent) {
+            val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+            bluetoothOn.value = state == BluetoothAdapter.STATE_ON
+            if (state == BluetoothAdapter.STATE_ON && reconnectWhenOn) {
+                reconnectWhenOn = false
+                reconnectLastDevice()
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -148,6 +202,13 @@ class MainActivity : ComponentActivity() {
         androidx.core.content.ContextCompat.registerReceiver(
             this, bondReceiver,
             IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED),
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+        )
+        bluetoothOn.value = isBluetoothEnabled()
+        btAccess.value = if (hasConnectPermission()) BtAccess.GRANTED else BtAccess.NEEDED
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, btStateReceiver,
+            IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED),
             androidx.core.content.ContextCompat.RECEIVER_EXPORTED
         )
 
@@ -194,7 +255,12 @@ class MainActivity : ComponentActivity() {
                         gamepad = gamepad,
                         isWindowsMode = isWindowsMode.value,
                         connectedDeviceName = connectedDeviceName.value,
-                        isConnected = hidConnectionState.value == BluetoothProfile.STATE_CONNECTED,
+                        connectionState = hidConnectionState.value,
+                        bluetoothOn = bluetoothOn.value,
+                        btAccess = btAccess.value,
+                        onRequestAccess = { requestBluetoothAccess() },
+                        onReconnect = { connectLastDevice() },
+                        onEnableBluetooth = { requestEnableBluetooth() },
                         layout = previewLayout.value
                             ?: layoutRepo.load(activeLayoutId.value)
                             ?: ControllerLayout.default(),
@@ -268,13 +334,21 @@ class MainActivity : ComponentActivity() {
                                         hidConnectionState = hidConnectionState.value,
                                         connectedDeviceName = connectedDeviceName.value,
                                         ownDeviceName = ownDeviceName.value,
-                                        onStartClick = { requestPermissionsAndInit() },
+                                        onStartClick = { connectLastDevice() },
+                                        btAccess = btAccess.value,
+                                        onRequestAccess = { requestBluetoothAccess() },
+                                        connectingName = connectingName.value,
+                                        onCancelConnecting = { cancelConnecting() },
+                                        onScan = { scanForDevices() },
+                                        onMakeVisible = { makeVisible() },
+                                        bluetoothOn = bluetoothOn.value,
+                                        onEnableBluetooth = { requestEnableBluetooth() },
                                         onPairDevice = { device -> pairDevice(device) },
                                         onUnpairDevice = { device -> unpairDevice(device) },
                                         connectedDeviceAddress = gamepad?.connectedDevice?.address ?: "",
                                         connectedDevice = gamepad?.connectedDevice,
                                         activeDInputMode = gamepad?.isWindowsDInputMode ?: false,
-                                        onConnectDevice = { device -> gamepad?.connectDevice(device) },
+                                        onConnectDevice = { device -> connectTo(device) },
                                         onCancelConnect = { device ->
                                             userCancelledConnect = true
                                             gamepad?.cancelConnect(device)
@@ -375,48 +449,113 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        requestPermissionsAndInit()
+        if (btAccess.value == BtAccess.GRANTED) initGamepad()
     }
 
-    private fun requestPermissionsAndInit() {
-        val needed = mutableListOf<String>()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)
-                needed.add(Manifest.permission.BLUETOOTH_CONNECT)
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED)
-                needed.add(Manifest.permission.BLUETOOTH_SCAN)
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED)
-                needed.add(Manifest.permission.BLUETOOTH_ADVERTISE)
-        } else {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
-                needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
+    private fun granted(permission: String) =
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+    private fun hasConnectPermission() =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S || granted(Manifest.permission.BLUETOOTH_CONNECT)
+
+    private fun requestBluetoothAccess() {
+        if (btAccess.value == BtAccess.BLOCKED) {
+            openAppSettings()
+            return
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
-                needed.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        if (needed.isNotEmpty()) {
-            permissionLauncher.launch(needed.toTypedArray())
+        permissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+    }
+
+    private fun withPermission(permission: String, action: () -> Unit) {
+        if (granted(permission)) {
+            action()
         } else {
-            initGamepad()
+            afterPermission = action
+            pendingPermission = permission
+            actionPermissionLauncher.launch(permission)
         }
     }
 
-    // ACTION_REQUEST_ENABLE is associated with BLUETOOTH_CONNECT by lint. This runs only after that
-    // permission is granted (requestPermissionsAndInit gates initGamepad), and the call is wrapped
-    // to fall back to Bluetooth settings if it is ever denied — so the warning is a false positive.
+    private fun scanForDevices() = withPermission(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Manifest.permission.BLUETOOTH_SCAN
+        else Manifest.permission.ACCESS_FINE_LOCATION
+    ) { startDiscovery() }
+
+    private fun makeVisible() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) withPermission(Manifest.permission.BLUETOOTH_ADVERTISE) { makeDiscoverable() }
+        else makeDiscoverable()
+    }
+
+    private fun connectLastDevice() {
+        if (!reconnectLastDevice()) Toast.makeText(this, "Pick a device below", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun connectTo(device: BluetoothDevice) {
+        connectingDevice = device
+        connectingName.value = try { device.name ?: device.address } catch (_: SecurityException) { device.address }
+        val gp = gamepad ?: return
+        val current = gp.connectedDevice
+        // The stack serves one host and ignores a connect while linked, so drop the current PC first.
+        if (gp.connectionState == BluetoothProfile.STATE_CONNECTED && current != null && current.address != device.address) {
+            switchingTo = device
+            userCancelledConnect = true
+            gp.cancelConnect(current)
+            return
+        }
+        gp.connectDevice(device)
+    }
+
+    private fun cancelConnecting() {
+        val device = connectingDevice ?: return
+        if (switchingTo != null) {
+            switchingTo = null
+            connectingName.value = ""
+            connectingDevice = null
+            return
+        }
+        userCancelledConnect = true
+        gamepad?.cancelConnect(device)
+    }
+
+    private fun requestNotificationsIfNeeded() {
+        if (notificationsAsked || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (granted(Manifest.permission.POST_NOTIFICATIONS)) return
+        notificationsAsked = true
+        notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    // A denial without rationale means "don't ask again" only if it was denied before;
+    // a first dialog dismissed by tapping outside looks the same.
+    private fun isPermanentlyDenied(permission: String): Boolean {
+        val key = "denied_$permission"
+        if (shouldShowRequestPermissionRationale(permission)) {
+            prefs.edit().putBoolean(key, true).apply()
+            return false
+        }
+        return prefs.getBoolean(key, false)
+    }
+
+    private fun openAppSettings() {
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
+    }
+
+    private fun isBluetoothEnabled(): Boolean = try {
+        (getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter?.isEnabled == true
+    } catch (_: Exception) { false }
+
+    // Lint ties ACTION_REQUEST_ENABLE to BLUETOOTH_CONNECT; a missing grant throws and falls back to settings.
     @SuppressLint("MissingPermission")
-    fun initGamepad() {
-        val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
-        val adapter = manager?.adapter
-        if (adapter != null && !adapter.isEnabled) {
-            try {
-                startActivity(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
-            } catch (_: Exception) {
-                startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-            }
+    private fun requestEnableBluetooth() {
+        reconnectWhenOn = true
+        try {
+            enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+        } catch (_: Exception) {
+            reconnectWhenOn = false
+            startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
         }
+    }
 
+    fun initGamepad() {
         // The service can stop the gamepad without this activity being destroyed.
         if (gamepad !== BluetoothHidGamepad.current) gamepad = null
         if (gamepad == null) {
@@ -428,6 +567,20 @@ class MainActivity : ComponentActivity() {
                         hidProfileConnected.value = gp.isAppRegistered || gp.connectionState != BluetoothProfile.STATE_DISCONNECTED
                         hidAppRegistered.value = gp.isAppRegistered
                         hidConnectionState.value = gp.connectionState
+                        val next = switchingTo
+                        if (next != null && gp.connectionState == BluetoothProfile.STATE_DISCONNECTED) {
+                            switchingTo = null
+                            userCancelledConnect = false
+                            gp.connectDevice(next)
+                            return@runOnUiThread
+                        }
+                        // Cleared only when an attempt ends; a queued connect passes through DISCONNECTED first.
+                        if (gp.connectionState == BluetoothProfile.STATE_CONNECTED ||
+                            (gp.connectionState == BluetoothProfile.STATE_DISCONNECTED && prevState != BluetoothProfile.STATE_DISCONNECTED)
+                        ) {
+                            connectingName.value = ""
+                            connectingDevice = null
+                        }
                         connectedDeviceName.value = gp.connectedDeviceName
                         ownDeviceName.value = gp.ownDeviceName
 
@@ -469,7 +622,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (gamepad !== BluetoothHidGamepad.current) initGamepad()
+        bluetoothOn.value = isBluetoothEnabled()
+        if (hasConnectPermission()) {
+            if (btAccess.value != BtAccess.GRANTED) {
+                btAccess.value = BtAccess.GRANTED
+                requestNotificationsIfNeeded()
+            }
+            if (gamepad == null || gamepad !== BluetoothHidGamepad.current) initGamepad()
+        }
         if (gamepad != null) startGamepadService()
     }
 
@@ -489,14 +649,15 @@ class MainActivity : ComponentActivity() {
         if (gp != null) gp.stop(stopService) else stopService()
     }
 
-    private fun reconnectLastDevice() {
-        val address = prefs.getString("lastDeviceAddress", null) ?: return
-        val gp = gamepad ?: return
-        try {
+    private fun reconnectLastDevice(): Boolean {
+        val address = prefs.getString("lastDeviceAddress", null) ?: return false
+        if (gamepad == null) return false
+        return try {
             val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
-            val device = manager?.adapter?.bondedDevices?.find { it.address == address }
-            if (device != null) gp.connectDevice(device)
-        } catch (_: SecurityException) { }
+            val device = manager?.adapter?.bondedDevices?.find { it.address == address } ?: return false
+            connectTo(device)
+            true
+        } catch (_: SecurityException) { false }
     }
 
     fun getBondedDevices(): List<BluetoothDevice> {
@@ -523,7 +684,7 @@ class MainActivity : ComponentActivity() {
     }
 
     // Make the phone discoverable so a PC can find and pair with it (system consent dialog).
-    fun makeDiscoverable() {
+    private fun makeDiscoverable() {
         try {
             startActivity(
                 Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
@@ -556,6 +717,9 @@ class MainActivity : ComponentActivity() {
         stopGamepad()
         try {
             unregisterReceiver(bondReceiver)
+        } catch (_: Exception) {}
+        try {
+            unregisterReceiver(btStateReceiver)
         } catch (_: Exception) {}
     }
 }

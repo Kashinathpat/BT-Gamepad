@@ -1,5 +1,6 @@
 package com.bluetooth.gamepad
 
+import android.bluetooth.BluetoothProfile
 import android.os.Handler
 import android.os.Looper
 import android.os.VibrationEffect
@@ -9,6 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -33,6 +35,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -68,6 +71,8 @@ import com.bluetooth.gamepad.ui.theme.DpadNormal
 import com.bluetooth.gamepad.ui.theme.DpadPressed
 import com.bluetooth.gamepad.ui.theme.OverlayPillLight
 import com.bluetooth.gamepad.ui.theme.StatusConnected
+import com.bluetooth.gamepad.ui.theme.StatusConnecting
+import com.bluetooth.gamepad.ui.theme.StatusError
 import com.bluetooth.gamepad.ui.theme.StickBase
 import com.bluetooth.gamepad.ui.theme.StickKnob
 import com.bluetooth.gamepad.ui.theme.StickLabel
@@ -153,7 +158,12 @@ fun ControllerScreen(
     gamepad: BluetoothHidGamepad?,
     isWindowsMode: Boolean,
     connectedDeviceName: String,
-    isConnected: Boolean = true,
+    connectionState: Int = BluetoothProfile.STATE_CONNECTED,
+    bluetoothOn: Boolean = true,
+    btAccess: BtAccess = BtAccess.GRANTED,
+    onRequestAccess: () -> Unit = {},
+    onReconnect: () -> Unit = {},
+    onEnableBluetooth: () -> Unit = {},
     layout: ControllerLayout = ControllerLayout.default(),
     layouts: List<ControllerLayout> = emptyList(),
     onLayoutSelect: (String) -> Unit = {},
@@ -175,6 +185,7 @@ fun ControllerScreen(
     val gate = remember { GyroGate() }
     val gyroOn = remember { mutableStateOf(true) }
     val motionAvailable = motionEnabled && motionManager.isModeAvailable(motionMode)
+    val isConnected = connectionState == BluetoothProfile.STATE_CONNECTED
 
     // Keyed only on what changes the sensor or where it sends; tunables go through updateTuning below so
     // a slider drag does not restart the sensor thread and rerun bias calibration.
@@ -375,6 +386,53 @@ fun ControllerScreen(
             onRecenter = { motionManager.recenter() },
             onBack = onStopClick
         )
+
+        if (!isConnected) {
+            ConnectionBanner(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 78.dp),
+                btAccess = btAccess,
+                bluetoothOn = bluetoothOn,
+                connecting = connectionState == BluetoothProfile.STATE_CONNECTING,
+                onRequestAccess = onRequestAccess,
+                onReconnect = onReconnect,
+                onEnableBluetooth = onEnableBluetooth
+            )
+        }
+    }
+}
+
+// Shown while no PC is receiving input, so a dropped link is never silent mid-game.
+@Composable
+private fun ConnectionBanner(
+    modifier: Modifier,
+    btAccess: BtAccess,
+    bluetoothOn: Boolean,
+    connecting: Boolean,
+    onRequestAccess: () -> Unit,
+    onReconnect: () -> Unit,
+    onEnableBluetooth: () -> Unit
+) {
+    val (message, actionLabel, action) = when {
+        btAccess == BtAccess.NEEDED -> Triple("Bluetooth access needed", "Allow", onRequestAccess)
+        btAccess == BtAccess.BLOCKED -> Triple("Bluetooth access blocked", "Open settings", onRequestAccess)
+        !bluetoothOn -> Triple("Bluetooth is off", "Turn on", onEnableBluetooth)
+        connecting -> Triple("Connecting…", null, null)
+        else -> Triple("Not connected", "Reconnect", onReconnect)
+    }
+    Row(
+        modifier = modifier
+            .background(OverlayPillLight, RoundedCornerShape(24.dp))
+            .padding(horizontal = 14.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(Modifier.size(8.dp).background(if (action == null) StatusConnecting else StatusError, CircleShape))
+        Text(message, fontSize = 12.sp, color = ControllerOnBtn, modifier = Modifier.padding(vertical = 10.dp))
+        if (actionLabel != null && action != null) {
+            TextButton(onClick = action) { Text(actionLabel, fontSize = 12.sp) }
+        }
     }
 }
 

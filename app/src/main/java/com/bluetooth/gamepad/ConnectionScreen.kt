@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Games
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -77,6 +78,14 @@ fun ConnectionScreen(
     connectedDeviceName: String,
     ownDeviceName: String,
     onStartClick: () -> Unit,
+    bluetoothOn: Boolean,
+    onEnableBluetooth: () -> Unit,
+    btAccess: BtAccess,
+    onRequestAccess: () -> Unit,
+    connectingName: String,
+    onCancelConnecting: () -> Unit,
+    onScan: () -> Unit,
+    onMakeVisible: () -> Unit,
     onPairDevice: (BluetoothDevice) -> Unit,
     onUnpairDevice: (BluetoothDevice) -> Unit,
     connectedDeviceAddress: String = "",
@@ -106,9 +115,13 @@ fun ConnectionScreen(
         }
     }
 
-    DisposableEffect(Unit) {
+    // Paired devices cannot be read while Bluetooth is off or access is missing, so reload when either changes.
+    LaunchedEffect(bluetoothOn, btAccess) {
         devices.clear()
         devices.addAll(activity.getBondedDevices())
+    }
+
+    DisposableEffect(Unit) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
@@ -151,8 +164,6 @@ fun ConnectionScreen(
             context, receiver, filter,
             androidx.core.content.ContextCompat.RECEIVER_EXPORTED
         )
-        // Inquiry scans degrade a live HID link, so never auto-scan while connected.
-        if (hidConnectionState != BluetoothProfile.STATE_CONNECTED) activity.startDiscovery()
         onDispose {
             activity.cancelDiscovery()
             try { context.unregisterReceiver(receiver) } catch (_: Exception) { }
@@ -217,12 +228,32 @@ fun ConnectionScreen(
 
             // Hero connection card
             item {
+                val isConnecting = hidConnectionState == BluetoothProfile.STATE_CONNECTING
                 val heroGradient = if (isConnected) {
                     Brush.linearGradient(listOf(cs.primaryContainer, cs.secondaryContainer))
                 } else {
                     Brush.linearGradient(listOf(cs.surfaceContainerHigh, cs.surfaceContainer))
                 }
                 val heroTextColor = if (isConnected) cs.onPrimaryContainer else cs.onSurface
+                val statusLabel = when {
+                    btAccess == BtAccess.NEEDED -> "PERMISSION NEEDED"
+                    btAccess == BtAccess.BLOCKED -> "PERMISSION BLOCKED"
+                    !bluetoothOn -> "BLUETOOTH OFF"
+                    else -> buildStatusLabel(hidProfileConnected, hidAppRegistered, hidConnectionState)
+                }
+                val title = when {
+                    btAccess == BtAccess.NEEDED -> "Allow Bluetooth access"
+                    btAccess == BtAccess.BLOCKED -> "Bluetooth access is blocked"
+                    !bluetoothOn -> "Bluetooth is off"
+                    isConnected -> connectedDeviceName
+                    isConnecting -> if (connectingName.isNotEmpty()) "Connecting to $connectingName" else "Connecting"
+                    else -> "No device connected"
+                }
+                val note = when (btAccess) {
+                    BtAccess.NEEDED -> "Needed to connect to a device as a gamepad."
+                    BtAccess.BLOCKED -> "Allow Nearby devices for BT Gamepad in app settings."
+                    BtAccess.GRANTED -> null
+                }
 
                 Box(
                     modifier = Modifier
@@ -236,7 +267,7 @@ fun ConnectionScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            val dotColor = when (hidConnectionState) {
+                            val dotColor = if (btAccess != BtAccess.GRANTED || !bluetoothOn) StatusError else when (hidConnectionState) {
                                 BluetoothProfile.STATE_CONNECTED  -> StatusConnected
                                 BluetoothProfile.STATE_CONNECTING -> StatusConnecting
                                 else -> if (hidAppRegistered) StatusConnecting else StatusError
@@ -247,7 +278,7 @@ fun ConnectionScreen(
                                     .background(dotColor, CircleShape)
                             )
                             Text(
-                                buildStatusLabel(hidProfileConnected, hidAppRegistered, hidConnectionState),
+                                statusLabel,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 1.sp,
@@ -276,7 +307,7 @@ fun ConnectionScreen(
 
                         Spacer(Modifier.height(10.dp))
                         Text(
-                            if (isConnected) connectedDeviceName else "No device connected",
+                            title,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = (-0.3).sp,
@@ -284,15 +315,38 @@ fun ConnectionScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        if (note != null) {
+                            Text(
+                                note,
+                                fontSize = 13.sp,
+                                color = heroTextColor.copy(alpha = 0.75f),
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
 
                         Spacer(Modifier.height(16.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (isConnecting && btAccess == BtAccess.GRANTED && bluetoothOn) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    strokeWidth = 3.dp,
+                                    color = cs.primary
+                                )
+                                OutlinedButton(onClick = onCancelConnecting, shape = RoundedCornerShape(999.dp)) {
+                                    Text("Cancel", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        } else {
                             Button(
                                 onClick = {
-                                    if (isConnected && connectedDevice != null) {
-                                        onDisconnectDevice(connectedDevice)
-                                    } else {
-                                        onStartClick()
+                                    when {
+                                        btAccess != BtAccess.GRANTED -> onRequestAccess()
+                                        !bluetoothOn -> onEnableBluetooth()
+                                        isConnected -> connectedDevice?.let(onDisconnectDevice)
+                                        else -> onStartClick()
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(
@@ -305,7 +359,13 @@ fun ConnectionScreen(
                                 Icon(Icons.Default.Bluetooth, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    if (isConnected) "Disconnect" else "Connect",
+                                    when {
+                                        btAccess == BtAccess.NEEDED -> "Allow"
+                                        btAccess == BtAccess.BLOCKED -> "Open settings"
+                                        !bluetoothOn -> "Turn on Bluetooth"
+                                        isConnected -> "Disconnect"
+                                        else -> "Connect"
+                                    },
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -318,6 +378,7 @@ fun ConnectionScreen(
 
             // Section header with scan indicator
             item {
+                val listAvailable = bluetoothOn && btAccess == BtAccess.GRANTED
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -325,7 +386,7 @@ fun ConnectionScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             "NEARBY",
                             fontSize = 11.sp,
@@ -333,38 +394,53 @@ fun ConnectionScreen(
                             letterSpacing = 1.2.sp,
                             color = cs.onSurfaceVariant
                         )
-                        Text(
-                            "${devices.size} devices",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = cs.onSurface
-                        )
+                        if (listAvailable) {
+                            Text(
+                                "${devices.size} devices",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = cs.onSurface
+                            )
+                        } else {
+                            Text(
+                                if (btAccess != BtAccess.GRANTED) "Allow Bluetooth access to see your paired devices"
+                                else "Turn on Bluetooth to see your paired devices",
+                                fontSize = 14.sp,
+                                color = cs.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        }
                     }
-                    Row(
+                    if (listAvailable) Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        TextButton(
-                            onClick = { activity.makeDiscoverable() }
-                        ) {
+                        TextButton(onClick = onMakeVisible) {
                             Text("Make visible", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                         if (isDiscovering.value) {
                             ScanningIndicator(cs.primary)
                         } else if (!isConnected) {
-                            TextButton(
-                                onClick = { activity.startDiscovery() }
-                            ) {
+                            TextButton(onClick = onScan) {
                                 Text("Scan", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
                 }
                 Spacer(Modifier.height(10.dp))
+                if (listAvailable && !isConnected && !(devices.isEmpty() && isDiscovering.value)) {
+                    Text(
+                        if (devices.isEmpty()) "No devices yet. Tap Make visible, then add this phone from the other device's Bluetooth settings."
+                        else "New device? Tap Make visible, then add this phone from its Bluetooth settings.",
+                        fontSize = 14.sp,
+                        color = cs.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+                    )
+                }
             }
 
             // Device list
-            items(devices, key = { it.address }) { device ->
+            items(if (bluetoothOn && btAccess == BtAccess.GRANTED) devices else emptyList(), key = { it.address }) { device ->
                 val name = try { device.name ?: device.address } catch (_: SecurityException) { device.address }
                 val isPaired = try { device.bondState == BluetoothDevice.BOND_BONDED } catch (_: SecurityException) { false }
                 val address = try { device.address } catch (_: SecurityException) { "" }
@@ -578,3 +654,5 @@ private fun buildStatusLabel(
         else -> "READY"
     }
 }
+
+enum class BtAccess { GRANTED, NEEDED, BLOCKED }
