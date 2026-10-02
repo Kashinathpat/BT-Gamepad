@@ -1,6 +1,7 @@
 package com.bluetooth.gamepad
 
 import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
@@ -34,6 +35,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Laptop
+import androidx.compose.material.icons.filled.Mouse
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Speaker
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material.icons.filled.Games
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -59,6 +70,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -91,6 +103,9 @@ fun ConnectionScreen(
     onUnpairDevice: (BluetoothDevice) -> Unit,
     connectedDeviceAddress: String = "",
     connectedDevice: BluetoothDevice? = null,
+    lastDeviceAddress: String = "",
+    showAllDevices: Boolean = false,
+    onShowAllDevicesChange: (Boolean) -> Unit = {},
     activeDInputMode: Boolean = false,
     onConnectDevice: (BluetoothDevice) -> Unit,
     onCancelConnect: (BluetoothDevice) -> Unit,
@@ -172,6 +187,10 @@ fun ConnectionScreen(
     }
 
     val isConnected = hidConnectionState == BluetoothProfile.STATE_CONNECTED
+    val keepVisible = setOf(connectedDeviceAddress, lastDeviceAddress, connectingAddress.value)
+    val listed = if (bluetoothOn && btAccess == BtAccess.GRANTED) devices.toList() else emptyList()
+    val hiddenCount = listed.count { !isLikelyHost(it) && it.address !in keepVisible }
+    val shown = if (showAllDevices) listed else listed.filter { isLikelyHost(it) || it.address in keepVisible }
 
     Scaffold(containerColor = cs.background) { innerPadding ->
         LazyColumn(
@@ -400,7 +419,7 @@ fun ConnectionScreen(
                         )
                         if (listAvailable) {
                             Text(
-                                "${devices.size} devices",
+                                "${shown.size} devices",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = cs.onSurface
@@ -432,9 +451,9 @@ fun ConnectionScreen(
                     }
                 }
                 Spacer(Modifier.height(10.dp))
-                if (listAvailable && !isConnected && !(devices.isEmpty() && isDiscovering.value)) {
+                if (listAvailable && !isConnected && !(shown.isEmpty() && isDiscovering.value)) {
                     Text(
-                        if (devices.isEmpty()) "No devices yet. Tap Make visible, then add this phone from the other device's Bluetooth settings."
+                        if (shown.isEmpty()) "No devices yet. Tap Make visible, then add this phone from the other device's Bluetooth settings."
                         else "New device? Tap Make visible, then add this phone from its Bluetooth settings.",
                         fontSize = 14.sp,
                         color = cs.onSurfaceVariant,
@@ -444,7 +463,7 @@ fun ConnectionScreen(
             }
 
             // Device list
-            items(if (bluetoothOn && btAccess == BtAccess.GRANTED) devices else emptyList(), key = { it.address }) { device ->
+            items(shown, key = { it.address }) { device ->
                 val name = try { device.name ?: device.address } catch (_: SecurityException) { device.address }
                 val isPaired = try { device.bondState == BluetoothDevice.BOND_BONDED } catch (_: SecurityException) { false }
                 val address = try { device.address } catch (_: SecurityException) { "" }
@@ -488,7 +507,7 @@ fun ConnectionScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Bluetooth,
+                                imageVector = deviceIcon(device),
                                 contentDescription = null,
                                 tint = if (isThisConnected) cs.onPrimaryContainer else cs.onSurfaceVariant,
                                 modifier = Modifier.size(22.dp)
@@ -591,6 +610,21 @@ fun ConnectionScreen(
                     }
                 }
             }
+
+            if (hiddenCount > 0) {
+                item {
+                    TextButton(
+                        onClick = { onShowAllDevicesChange(!showAllDevices) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (showAllDevices) "Hide audio and other devices" else "$hiddenCount hidden · Show all",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -660,3 +694,49 @@ private fun buildStatusLabel(
 }
 
 enum class BtAccess { GRANTED, NEEDED, BLOCKED }
+
+// Picks an icon from the class a device advertises; unknown or unreadable classes keep the Bluetooth icon.
+private fun deviceIcon(device: BluetoothDevice): ImageVector {
+    val cls = try { device.bluetoothClass } catch (_: SecurityException) { null } ?: return Icons.Default.Bluetooth
+    val minor = cls.deviceClass
+    return when (cls.majorDeviceClass) {
+        BluetoothClass.Device.Major.COMPUTER ->
+            if (minor == BluetoothClass.Device.COMPUTER_LAPTOP) Icons.Default.Laptop else Icons.Default.Computer
+        BluetoothClass.Device.Major.PHONE -> Icons.Default.Smartphone
+        BluetoothClass.Device.Major.AUDIO_VIDEO -> when (minor) {
+            BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES,
+            BluetoothClass.Device.AUDIO_VIDEO_WEARABLE_HEADSET,
+            BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE -> Icons.Default.Headphones
+            BluetoothClass.Device.AUDIO_VIDEO_VIDEO_DISPLAY_AND_LOUDSPEAKER,
+            BluetoothClass.Device.AUDIO_VIDEO_VIDEO_MONITOR,
+            BluetoothClass.Device.AUDIO_VIDEO_SET_TOP_BOX -> Icons.Default.Tv
+            else -> Icons.Default.Speaker
+        }
+        BluetoothClass.Device.Major.WEARABLE -> Icons.Default.Watch
+        // Peripheral minor bits: 0x40 keyboard, 0x80 pointing device; the rest are gamepads and similar.
+        BluetoothClass.Device.Major.PERIPHERAL -> when {
+            minor and 0x40 != 0 -> Icons.Default.Keyboard
+            minor and 0x80 != 0 -> Icons.Default.Mouse
+            else -> Icons.Default.SportsEsports
+        }
+        else -> Icons.Default.Bluetooth
+    }
+}
+
+// Audio gear, input devices and wearables never host a gamepad; unknown classes stay visible since some hosts report none.
+private fun isLikelyHost(device: BluetoothDevice): Boolean {
+    val cls = try { device.bluetoothClass } catch (_: SecurityException) { null } ?: return true
+    return when (cls.majorDeviceClass) {
+        BluetoothClass.Device.Major.AUDIO_VIDEO -> cls.deviceClass in setOf(
+            BluetoothClass.Device.AUDIO_VIDEO_VIDEO_DISPLAY_AND_LOUDSPEAKER,
+            BluetoothClass.Device.AUDIO_VIDEO_VIDEO_MONITOR,
+            BluetoothClass.Device.AUDIO_VIDEO_SET_TOP_BOX
+        )
+        BluetoothClass.Device.Major.PERIPHERAL,
+        BluetoothClass.Device.Major.WEARABLE,
+        BluetoothClass.Device.Major.HEALTH,
+        BluetoothClass.Device.Major.IMAGING,
+        BluetoothClass.Device.Major.TOY -> false
+        else -> true
+    }
+}

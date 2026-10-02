@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
     private val previewLayout = mutableStateOf<ControllerLayout?>(null)
     private val layoutsRefreshKey = mutableStateOf(0)
     private val autoReconnect = mutableStateOf(true)
+    private val showAllDevices = mutableStateOf(false)
     private val oledMode = mutableStateOf(false)
     private val blockEdgeGestures = mutableStateOf(true)
     private val pinScreen = mutableStateOf(false)
@@ -195,6 +196,7 @@ class MainActivity : ComponentActivity() {
         motionInvertX.value = prefs.getBoolean("motionInvertX", false)
         motionInvertY.value = prefs.getBoolean("motionInvertY", false)
         autoReconnect.value = prefs.getBoolean("autoReconnect", true)
+        showAllDevices.value = prefs.getBoolean("showAllDevices", false)
         oledMode.value = prefs.getBoolean("oledMode", false)
         blockEdgeGestures.value = prefs.getBoolean("blockEdgeGestures", true)
         pinScreen.value = prefs.getBoolean("pinScreen", false)
@@ -349,6 +351,12 @@ class MainActivity : ComponentActivity() {
                                         onUnpairDevice = { device -> unpairDevice(device) },
                                         connectedDeviceAddress = gamepad?.connectedDevice?.address ?: "",
                                         connectedDevice = gamepad?.connectedDevice,
+                                        lastDeviceAddress = prefs.getString("lastDeviceAddress", null) ?: "",
+                                        showAllDevices = showAllDevices.value,
+                                        onShowAllDevicesChange = { value ->
+                                            showAllDevices.value = value
+                                            prefs.edit().putBoolean("showAllDevices", value).apply()
+                                        },
                                         activeDInputMode = gamepad?.isWindowsDInputMode ?: false,
                                         onConnectDevice = { device -> connectTo(device) },
                                         onCancelConnect = { device ->
