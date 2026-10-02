@@ -153,6 +153,7 @@ class MainActivity : ComponentActivity() {
     private val bluetoothOn = mutableStateOf(true)
     private val btAccess = mutableStateOf(BtAccess.NEEDED)
     private val connectingName = mutableStateOf("")
+    private val connectFailedName = mutableStateOf("")
     private var connectingDevice: BluetoothDevice? = null
     private var switchingTo: BluetoothDevice? = null
     // Set when the user turns Bluetooth on from the app, so the last device is resumed once it is up.
@@ -339,6 +340,7 @@ class MainActivity : ComponentActivity() {
                                         onRequestAccess = { requestBluetoothAccess() },
                                         connectingName = connectingName.value,
                                         onCancelConnecting = { cancelConnecting() },
+                                        connectFailedName = connectFailedName.value,
                                         onScan = { scanForDevices() },
                                         onMakeVisible = { makeVisible() },
                                         bluetoothOn = bluetoothOn.value,
@@ -493,6 +495,7 @@ class MainActivity : ComponentActivity() {
     private fun connectTo(device: BluetoothDevice) {
         connectingDevice = device
         connectingName.value = try { device.name ?: device.address } catch (_: SecurityException) { device.address }
+        connectFailedName.value = ""
         val gp = gamepad ?: return
         val current = gp.connectedDevice
         // The stack serves one host and ignores a connect while linked, so drop the current PC first.
@@ -567,6 +570,8 @@ class MainActivity : ComponentActivity() {
                         hidProfileConnected.value = gp.isAppRegistered || gp.connectionState != BluetoothProfile.STATE_DISCONNECTED
                         hidAppRegistered.value = gp.isAppRegistered
                         hidConnectionState.value = gp.connectionState
+                        updateGamepadService(gp.connectionState)
+                        val attemptName = connectingName.value
                         val next = switchingTo
                         if (next != null && gp.connectionState == BluetoothProfile.STATE_DISCONNECTED) {
                             switchingTo = null
@@ -587,13 +592,14 @@ class MainActivity : ComponentActivity() {
                         when (gp.connectionState) {
                             BluetoothProfile.STATE_CONNECTED -> {
                                 prefs.edit().putString("lastDeviceAddress", gp.connectedDevice?.address).apply()
+                                connectFailedName.value = ""
                                 Toast.makeText(this, "Connected to ${gp.connectedDeviceName}", Toast.LENGTH_SHORT).show()
                             }
                             BluetoothProfile.STATE_DISCONNECTED -> {
                                 if (!userCancelledConnect) {
                                     when (prevState) {
                                         BluetoothProfile.STATE_CONNECTING ->
-                                            Toast.makeText(this, "Connecting device failed", Toast.LENGTH_SHORT).show()
+                                            connectFailedName.value = attemptName.ifEmpty { "the device" }
                                         BluetoothProfile.STATE_CONNECTED ->
                                             Toast.makeText(this, "Disconnected", Toast.LENGTH_SHORT).show()
                                     }
@@ -609,12 +615,16 @@ class MainActivity : ComponentActivity() {
                 reconnectLastDevice()
             }
         }
-        // The stack unregisters a HID app whose process drops below foreground-service importance.
-        startGamepadService()
         ownDeviceName.value = gamepad?.ownDeviceName ?: ""
     }
 
-    private fun startGamepadService() {
+    // The stack unregisters a HID app whose process drops below foreground-service importance, so a link
+    // that should survive leaving the app needs the service; with no link the notification would only mislead.
+    private fun updateGamepadService(state: Int) {
+        if (state == BluetoothProfile.STATE_DISCONNECTED) {
+            stopService(Intent(this, GamepadForegroundService::class.java))
+            return
+        }
         try {
             startForegroundService(Intent(this, GamepadForegroundService::class.java))
         } catch (_: Exception) { }
@@ -630,7 +640,10 @@ class MainActivity : ComponentActivity() {
             }
             if (gamepad == null || gamepad !== BluetoothHidGamepad.current) initGamepad()
         }
-        if (gamepad != null) startGamepadService()
+        val gp = gamepad ?: return
+        updateGamepadService(gp.connectionState)
+        // Leaving the app without a link lets the stack drop the registration, so take it back on return.
+        if (!gp.isAppRegistered) gp.retryRegister()
     }
 
     private fun stopGamepad() {

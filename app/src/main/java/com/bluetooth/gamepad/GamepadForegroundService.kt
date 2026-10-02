@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothProfile
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -39,7 +40,13 @@ class GamepadForegroundService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
-        return START_STICKY
+        // startForeground must still run first; a start that lands after the link dropped then removes it at once.
+        if ((BluetoothHidGamepad.current?.connectionState ?: BluetoothProfile.STATE_DISCONNECTED) == BluetoothProfile.STATE_DISCONNECTED) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+        // Not sticky: a restart without the app has no link to keep and would only show a stale notification.
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

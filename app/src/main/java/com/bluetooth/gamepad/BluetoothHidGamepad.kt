@@ -410,6 +410,12 @@ class BluetoothHidGamepad(context: Context) {
         if (!isAppRegistered) scheduleRegister()
     }
 
+    fun retryRegister() {
+        if (stopping || isAppRegistered) return
+        registerAttempts.set(0)
+        registerApp()
+    }
+
     // Accepted-then-dropped registers must count too, or that pair loops forever with no delay.
     private fun scheduleRegister() {
         if (stopping) return

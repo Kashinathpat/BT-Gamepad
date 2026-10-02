@@ -84,6 +84,7 @@ fun ConnectionScreen(
     onRequestAccess: () -> Unit,
     connectingName: String,
     onCancelConnecting: () -> Unit,
+    connectFailedName: String,
     onScan: () -> Unit,
     onMakeVisible: () -> Unit,
     onPairDevice: (BluetoothDevice) -> Unit,
@@ -249,10 +250,13 @@ fun ConnectionScreen(
                     isConnecting -> if (connectingName.isNotEmpty()) "Connecting to $connectingName" else "Connecting"
                     else -> "No device connected"
                 }
-                val note = when (btAccess) {
-                    BtAccess.NEEDED -> "Needed to connect to a device as a gamepad."
-                    BtAccess.BLOCKED -> "Allow Nearby devices for BT Gamepad in app settings."
-                    BtAccess.GRANTED -> null
+                val note = when {
+                    btAccess == BtAccess.NEEDED -> "Needed to connect to a device as a gamepad."
+                    btAccess == BtAccess.BLOCKED -> "Allow Nearby devices for BT Gamepad in app settings."
+                    !bluetoothOn -> null
+                    !isConnected && !isConnecting && connectFailedName.isNotEmpty() ->
+                        "Couldn't connect to $connectFailedName. If this keeps happening, remove this phone from its Bluetooth settings, then pair again with this app open."
+                    else -> null
                 }
 
                 Box(
