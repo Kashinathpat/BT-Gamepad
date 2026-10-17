@@ -12,13 +12,8 @@ import android.view.Surface
 import android.view.WindowManager
 import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.exp
-import kotlin.math.min
-import kotlin.math.sign
-import kotlin.math.sin
-import kotlin.math.sqrt
 
+// AIM maps the current rotation speed to the stick; STEERING maps tilt to the X axis.
 enum class MotionMode { AIM, STEERING }
 
 class MotionSensorManager(private val context: Context) {
@@ -38,22 +33,14 @@ class MotionSensorManager(private val context: Context) {
 
     // Tunables are written from the main thread (updateTuning) and read on the sensor thread.
     private var mode = MotionMode.AIM
+    private val gyroAim = GyroAim()
     @Volatile private var degPerSecForMax = 90f
     @Volatile private var invertX = false
     @Volatile private var invertY = false
 
-    private var biasX = 0f; private var biasY = 0f; private var biasZ = 0f
-    private var biasInitialized = false
-
-    private var gravX = 0f; private var gravY = 0f; private var gravZ = -1f
-    private var gravInitialized = false
-
     private var accelAimX = 0f
     private var accelAimY = 0f
     private var accelAimZ = -9.81f
-
-    private var posX = 0f
-    private var posY = 0f
 
     private var lastSentX = 0f
     private var lastSentY = 0f
@@ -70,13 +57,6 @@ class MotionSensorManager(private val context: Context) {
     private var lastRotationCheckMs = 0L
 
     companion object {
-        private const val STILL_THRESHOLD = 0.03f
-        private const val BIAS_SMOOTH = 0.02f
-        private const val ACCEL_TRUST = 0.02f
-        private const val YAW_RELAX = 1.41f
-        private const val INTEGRATE_HALFLIFE_S = 0.15f
-        // Full-rate rotation reaches full deflection in 1/INTEGRATION_GAIN seconds.
-        private const val INTEGRATION_GAIN = 3f
         private const val SENSOR_PERIOD_US = 5000
         private const val EMIT_EPSILON = 0.004f
         private const val STEERING_RANGE_DEG = 32.0
@@ -90,10 +70,10 @@ class MotionSensorManager(private val context: Context) {
         override fun onSensorChanged(event: SensorEvent) {
             if (recenterRequested) {
                 recenterRequested = false
-                posX = 0f; posY = 0f
                 lastSentX = 0f; lastSentY = 0f
                 wasActive = false
                 steeringCenter = null
+                gyroAim.recenter()
                 // Emitted here so it lands after any sample computed before the request.
                 onMotion?.invoke(0f, 0f)
             }
@@ -164,44 +144,8 @@ class MotionSensorManager(private val context: Context) {
         }
         val gz = event.values[2]
 
-        val speed3 = sqrt(gx * gx + gy * gy + gz * gz)
-        val isStill = speed3 < STILL_THRESHOLD
-        if (!biasInitialized) {
-            biasX = gx; biasY = gy; biasZ = gz; biasInitialized = true
-        } else if (isStill) {
-            biasX += (gx - biasX) * BIAS_SMOOTH
-            biasY += (gy - biasY) * BIAS_SMOOTH
-            biasZ += (gz - biasZ) * BIAS_SMOOTH
-        }
-        val cgx = gx - biasX
-        val cgy = gy - biasY
-        val cgz = gz - biasZ
-
-        updateGravity(cgx, cgy, cgz, dt)
-
-        // Player-space rates: pitch stays local, yaw takes its sign from rotation about gravity so
-        // the hold angle (flat vs upright) does not matter and gravity error cannot leak in.
-        val worldYaw = cgy * gravY + cgz * gravZ
-        val yawMag = sqrt(cgy * cgy + cgz * cgz)
-        val yawRate = -sign(worldYaw) * min(abs(worldYaw) * YAW_RELAX, yawMag)
-        val pitchRate = cgx
-
         val maxRad = (degPerSecForMax * PI / 180.0).toFloat()
-        posX = (posX + yawRate / maxRad * dt * INTEGRATION_GAIN).coerceIn(-1f, 1f)
-        posY = (posY + pitchRate / maxRad * dt * INTEGRATION_GAIN).coerceIn(-1f, 1f)
-
-        // Recenter only while still, so a slow deliberate turn holds its deflection.
-        if (isStill) {
-            val decay = exp(-0.693f / INTEGRATE_HALFLIFE_S * dt)
-            posX *= decay
-            posY *= decay
-        }
-
-        var x = posX
-        var y = posY
-        val mag = sqrt(x * x + y * y)
-        if (mag > 1f) { x /= mag; y /= mag }
-        return x to y
+        return gyroAim.step(gx, gy, gz, accelAimX, accelAimY, accelAimZ, dt, maxRad)
     }
 
     private fun steeringValues(event: SensorEvent): Pair<Float, Float> {
@@ -243,37 +187,6 @@ class MotionSensorManager(private val context: Context) {
             val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
             wm.defaultDisplay.rotation
         }
-    }
-
-    // Rotate stored gravity by the inverse device rotation, then nudge toward accelerometer down.
-    private fun updateGravity(wx: Float, wy: Float, wz: Float, dt: Float) {
-        val ax = accelAimX; val ay = accelAimY; val az = accelAimZ
-        val al = sqrt(ax * ax + ay * ay + az * az)
-        if (!gravInitialized) {
-            if (al > 1e-6f) { gravX = -ax / al; gravY = -ay / al; gravZ = -az / al }
-            gravInitialized = true
-            return
-        }
-        val w = sqrt(wx * wx + wy * wy + wz * wz)
-        val angle = w * dt
-        if (angle > 1e-7f) {
-            val kx = -wx / w; val ky = -wy / w; val kz = -wz / w
-            val c = cos(angle); val s = sin(angle)
-            val dot = kx * gravX + ky * gravY + kz * gravZ
-            val crX = ky * gravZ - kz * gravY
-            val crY = kz * gravX - kx * gravZ
-            val crZ = kx * gravY - ky * gravX
-            gravX = gravX * c + crX * s + kx * dot * (1f - c)
-            gravY = gravY * c + crY * s + ky * dot * (1f - c)
-            gravZ = gravZ * c + crZ * s + kz * dot * (1f - c)
-        }
-        if (al > 1e-6f) {
-            gravX += (-ax / al - gravX) * ACCEL_TRUST
-            gravY += (-ay / al - gravY) * ACCEL_TRUST
-            gravZ += (-az / al - gravZ) * ACCEL_TRUST
-        }
-        val gl = sqrt(gravX * gravX + gravY * gravY + gravZ * gravZ)
-        if (gl > 1e-6f) { gravX /= gl; gravY /= gl; gravZ /= gl }
     }
 
     fun start(
@@ -332,14 +245,11 @@ class MotionSensorManager(private val context: Context) {
     }
 
     private fun reset() {
-        biasInitialized = false
-        gravInitialized = false
         lastGyroTsNs = 0L
-        posX = 0f; posY = 0f
+        gyroAim.reset()
         lastSentX = 0f; lastSentY = 0f
         wasActive = false
         steeringCenter = null
-        gravX = 0f; gravY = 0f; gravZ = -1f
         accelAimX = 0f; accelAimY = 0f; accelAimZ = -9.81f
     }
 }

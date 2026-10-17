@@ -663,7 +663,7 @@ private fun MotionModeRow(
                 Text("Motion mode", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
                 Text(
                     if (mode == MotionMode.STEERING) "Tilt the phone like a wheel"
-                    else "Turn the phone to aim",
+                    else "Aim follows how fast you turn; stops when you stop",
                     fontSize = 12.sp,
                     color = cs.onSurfaceVariant,
                     modifier = Modifier.padding(top = 1.dp)
