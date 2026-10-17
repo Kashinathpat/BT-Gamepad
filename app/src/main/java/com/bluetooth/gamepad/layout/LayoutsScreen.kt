@@ -1,4 +1,4 @@
-package com.bluetooth.gamepad
+package com.bluetooth.gamepad.layout
 
 import android.content.ClipData
 import android.content.Intent

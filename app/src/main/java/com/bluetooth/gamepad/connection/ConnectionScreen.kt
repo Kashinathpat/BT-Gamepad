@@ -1,4 +1,4 @@
-package com.bluetooth.gamepad
+package com.bluetooth.gamepad.connection
 
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothClass
@@ -77,6 +77,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bluetooth.gamepad.MainActivity
+import com.bluetooth.gamepad.bluetooth.BtAccess
 import com.bluetooth.gamepad.ui.theme.StatusConnected
 import com.bluetooth.gamepad.ui.theme.StatusConnecting
 import com.bluetooth.gamepad.ui.theme.StatusError
@@ -692,8 +694,6 @@ private fun buildStatusLabel(
         else -> "READY"
     }
 }
-
-enum class BtAccess { GRANTED, NEEDED, BLOCKED }
 
 // Picks an icon from the class a device advertises; unknown or unreadable classes keep the Bluetooth icon.
 private fun deviceIcon(device: BluetoothDevice): ImageVector {

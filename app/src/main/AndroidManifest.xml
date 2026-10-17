@@ -38,7 +38,7 @@
             </intent-filter>
         </activity>
         <service
-            android:name=".GamepadForegroundService"
+            android:name=".bluetooth.GamepadForegroundService"
             android:foregroundServiceType="connectedDevice"
             android:exported="false" />
         <provider

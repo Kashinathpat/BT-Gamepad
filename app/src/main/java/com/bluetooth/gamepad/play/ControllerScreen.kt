@@ -1,4 +1,4 @@
-package com.bluetooth.gamepad
+package com.bluetooth.gamepad.play
 
 import android.bluetooth.BluetoothProfile
 import android.os.Build
@@ -68,6 +68,20 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bluetooth.gamepad.R
+import com.bluetooth.gamepad.bluetooth.BluetoothHidGamepad
+import com.bluetooth.gamepad.bluetooth.BtAccess
+import com.bluetooth.gamepad.layout.ButtonBehavior
+import com.bluetooth.gamepad.layout.ButtonConfig
+import com.bluetooth.gamepad.layout.ButtonFace
+import com.bluetooth.gamepad.layout.ControllerLayout
+import com.bluetooth.gamepad.layout.OledBright
+import com.bluetooth.gamepad.layout.OledDim
+import com.bluetooth.gamepad.layout.baseId
+import com.bluetooth.gamepad.layout.isPressable
+import com.bluetooth.gamepad.layout.isStick
+import com.bluetooth.gamepad.motion.MotionMode
+import com.bluetooth.gamepad.motion.MotionSensorManager
 import com.bluetooth.gamepad.ui.theme.ControllerBg
 import com.bluetooth.gamepad.ui.theme.ControllerOnBtn
 import com.bluetooth.gamepad.ui.theme.DpadNormal
@@ -79,6 +93,8 @@ import com.bluetooth.gamepad.ui.theme.StatusError
 import com.bluetooth.gamepad.ui.theme.StickBase
 import com.bluetooth.gamepad.ui.theme.StickKnob
 import com.bluetooth.gamepad.ui.theme.StickLabel
+import com.bluetooth.gamepad.util.HapticIntensity
+import com.bluetooth.gamepad.util.obtainVibrator
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sqrt

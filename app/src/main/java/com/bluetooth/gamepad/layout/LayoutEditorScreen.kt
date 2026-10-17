@@ -1,4 +1,4 @@
-package com.bluetooth.gamepad
+package com.bluetooth.gamepad.layout
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bluetooth.gamepad.R
 import com.bluetooth.gamepad.ui.theme.BtnA
 import com.bluetooth.gamepad.ui.theme.BtnB
 import com.bluetooth.gamepad.ui.theme.BtnPrimary

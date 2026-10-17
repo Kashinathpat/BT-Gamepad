@@ -1,4 +1,4 @@
-package com.bluetooth.gamepad
+package com.bluetooth.gamepad.bluetooth
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -11,6 +11,8 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.bluetooth.gamepad.MainActivity
+import com.bluetooth.gamepad.R
 
 class GamepadForegroundService : Service() {
 

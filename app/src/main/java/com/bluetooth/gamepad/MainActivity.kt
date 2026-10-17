@@ -45,8 +45,21 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.bluetooth.gamepad.bluetooth.BluetoothHidGamepad
+import com.bluetooth.gamepad.bluetooth.BtAccess
+import com.bluetooth.gamepad.bluetooth.GamepadForegroundService
+import com.bluetooth.gamepad.connection.ConnectionScreen
+import com.bluetooth.gamepad.layout.ControllerLayout
+import com.bluetooth.gamepad.layout.EditorSession
+import com.bluetooth.gamepad.layout.LayoutEditorScreen
+import com.bluetooth.gamepad.layout.LayoutRepository
+import com.bluetooth.gamepad.layout.LayoutsScreen
+import com.bluetooth.gamepad.motion.MotionMode
+import com.bluetooth.gamepad.play.ControllerScreen
+import com.bluetooth.gamepad.settings.SettingsScreen
 import com.bluetooth.gamepad.ui.theme.AppTheme
 import com.bluetooth.gamepad.ui.theme.BtGamepadTheme
+import com.bluetooth.gamepad.util.HapticIntensity
 import java.lang.reflect.Method
 
 enum class NavTab { CONNECT, LAYOUTS, SETTINGS }

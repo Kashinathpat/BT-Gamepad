@@ -1,4 +1,4 @@
-package com.bluetooth.gamepad
+package com.bluetooth.gamepad.motion
 
 import android.content.Context
 import android.hardware.Sensor

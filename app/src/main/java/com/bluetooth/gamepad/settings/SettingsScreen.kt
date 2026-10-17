@@ -1,4 +1,4 @@
-package com.bluetooth.gamepad
+package com.bluetooth.gamepad.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -50,9 +50,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bluetooth.gamepad.motion.MotionMode
+import com.bluetooth.gamepad.motion.MotionSensorManager
 import com.bluetooth.gamepad.ui.theme.AppTheme
-
-enum class HapticIntensity { OFF, LIGHT, MEDIUM, STRONG }
+import com.bluetooth.gamepad.util.HapticIntensity
+import com.bluetooth.gamepad.util.obtainVibrator
 
 @Composable
 fun SettingsScreen(

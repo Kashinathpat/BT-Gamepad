@@ -1,4 +1,4 @@
-package com.bluetooth.gamepad
+package com.bluetooth.gamepad.layout
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border

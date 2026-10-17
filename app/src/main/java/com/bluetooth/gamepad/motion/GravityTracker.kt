@@ -1,4 +1,4 @@
-package com.bluetooth.gamepad
+package com.bluetooth.gamepad.motion
 
 import kotlin.math.abs
 import kotlin.math.cos

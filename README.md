@@ -21,6 +21,20 @@ An elegant Android application that transforms your smartphone into a fully-feat
 
 ---
 
+## Latency
+
+Measured on a POCO F5 (Android 15) paired over Bluetooth to a Windows PC.
+
+| | Time |
+|---|---|
+| Phone send to PC, median | 10.8 ms |
+| Phone send to PC, average | 15.5 ms |
+| Stick drag, touch to PC, median | ~16 ms |
+
+Occasional spikes of 50 to 90 ms can happen over Bluetooth.
+
+---
+
 ## System Requirements
 
 - **Android 9 (API level 28) or newer.**
