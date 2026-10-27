@@ -50,9 +50,9 @@ import com.bluetooth.gamepad.bluetooth.GamepadForegroundService
 import com.bluetooth.gamepad.connection.ConnectionScreen
 import com.bluetooth.gamepad.layout.ControllerLayout
 import com.bluetooth.gamepad.layout.EditorSession
-import com.bluetooth.gamepad.layout.LayoutEditorScreen
 import com.bluetooth.gamepad.layout.LayoutRepository
 import com.bluetooth.gamepad.layout.LayoutsScreen
+import com.bluetooth.gamepad.layout.editor.LayoutEditorScreen
 import com.bluetooth.gamepad.play.ControllerScreen
 import com.bluetooth.gamepad.settings.AppSettings
 import com.bluetooth.gamepad.settings.SettingsScreen
