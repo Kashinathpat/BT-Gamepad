@@ -145,24 +145,32 @@ private fun sendStick(env: ControlEnv, isRight: Boolean, x: Float, y: Float) {
     if (isRight) env.gamepad?.setRightStickTouch(x, y) else env.gamepad?.setLeftStick(x, y)
 }
 
+internal class StickDeflection(val offsetX: Float, val offsetY: Float, val x: Float, val y: Float)
+
+// Position of the finger from the stick centre, clamped to the rim: a finger outside the circle pins to
+// the rim and stays there until it crosses back, rather than jumping to the opposite side. x and y are the
+// -1..1 stick values.
+internal fun stickDeflection(dx: Float, dy: Float, maxOffset: Float): StickDeflection {
+    var ox = dx
+    var oy = dy
+    val dist = sqrt(ox * ox + oy * oy)
+    if (dist > maxOffset && dist > 0f) {
+        ox = ox / dist * maxOffset
+        oy = oy / dist * maxOffset
+    }
+    val nx = if (maxOffset > 0f) (ox / maxOffset).coerceIn(-1f, 1f) else 0f
+    val ny = if (maxOffset > 0f) (oy / maxOffset).coerceIn(-1f, 1f) else 0f
+    return StickDeflection(ox, oy, nx, ny)
+}
+
 private fun stickControl(btn: ButtonConfig, r: FloatArray, btnPx: Float, env: ControlEnv): RuntimeControl {
     val isRight = btn.baseId == "RSTICK"
     val radius = btnPx / 2f
     val maxOffset = (btnPx - btnPx * 0.4f) / 2f  // knob is 0.4 of base
     fun apply(localX: Float, localY: Float) {
-        // Absolute position from centre, vector clamped to the rim: a finger outside the circle pins
-        // to the rim and stays there until it crosses back, rather than jumping to the opposite side.
-        var ox = localX - radius
-        var oy = localY - radius
-        val dist = sqrt(ox * ox + oy * oy)
-        if (dist > maxOffset && dist > 0f) {
-            ox = ox / dist * maxOffset
-            oy = oy / dist * maxOffset
-        }
-        env.stickOffsets[btn.id] = Offset(ox, oy)
-        val nx = if (maxOffset > 0f) (ox / maxOffset).coerceIn(-1f, 1f) else 0f
-        val ny = if (maxOffset > 0f) (oy / maxOffset).coerceIn(-1f, 1f) else 0f
-        holdStick(env, btn.id, isRight, nx, ny)
+        val d = stickDeflection(localX - radius, localY - radius, maxOffset)
+        env.stickOffsets[btn.id] = Offset(d.offsetX, d.offsetY)
+        holdStick(env, btn.id, isRight, d.x, d.y)
     }
     return RuntimeControl(
         r[0], r[1], r[2], r[3],
@@ -182,17 +190,9 @@ private fun floatingStickControl(btn: ButtonConfig, r: FloatArray, env: ControlE
     var originX = 0f
     var originY = 0f
     fun apply(localX: Float, localY: Float) {
-        var ox = localX - originX
-        var oy = localY - originY
-        val dist = sqrt(ox * ox + oy * oy)
-        if (dist > maxOffset && dist > 0f) {
-            ox = ox / dist * maxOffset
-            oy = oy / dist * maxOffset
-        }
-        env.stickOffsets[btn.id] = Offset(ox, oy)
-        val nx = if (maxOffset > 0f) (ox / maxOffset).coerceIn(-1f, 1f) else 0f
-        val ny = if (maxOffset > 0f) (oy / maxOffset).coerceIn(-1f, 1f) else 0f
-        holdStick(env, btn.id, isRight, nx, ny)
+        val d = stickDeflection(localX - originX, localY - originY, maxOffset)
+        env.stickOffsets[btn.id] = Offset(d.offsetX, d.offsetY)
+        holdStick(env, btn.id, isRight, d.x, d.y)
     }
     return RuntimeControl(
         r[0], r[1], r[2], r[3],
