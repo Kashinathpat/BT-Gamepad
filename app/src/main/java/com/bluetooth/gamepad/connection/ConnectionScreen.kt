@@ -64,6 +64,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -120,6 +121,7 @@ fun ConnectionScreen(
     val connectingAddress = remember { mutableStateOf<String?>(null) }
 
     val isDiscovering = remember { mutableStateOf(false) }
+    val currentCancelDiscovery = rememberUpdatedState(onCancelDiscovery)
 
     LaunchedEffect(hidConnectionState) {
         if (hidConnectionState == BluetoothProfile.STATE_CONNECTED ||
@@ -182,7 +184,7 @@ fun ConnectionScreen(
             androidx.core.content.ContextCompat.RECEIVER_EXPORTED
         )
         onDispose {
-            onCancelDiscovery()
+            currentCancelDiscovery.value()
             try { context.unregisterReceiver(receiver) } catch (_: Exception) { }
         }
     }

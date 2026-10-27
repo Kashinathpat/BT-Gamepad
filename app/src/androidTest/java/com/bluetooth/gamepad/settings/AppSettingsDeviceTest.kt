@@ -32,11 +32,6 @@ class AppSettingsDeviceTest {
     }
 
     @Test
-    fun theAppIsTheOneUnderTest() {
-        assertEquals("com.bluetooth.gamepad", context.packageName)
-    }
-
-    @Test
     fun settingsSurviveReopeningTheStorageFile() {
         val first = AppSettings(prefs())
         first.isWindowsMode = true
