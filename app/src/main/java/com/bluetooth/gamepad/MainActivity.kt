@@ -37,6 +37,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -189,186 +190,203 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             BtGamepadTheme(appTheme = settings.appTheme) {
-                val isFullScreen = controllerVisible.value || editingLayout.value != null
-                androidx.compose.runtime.LaunchedEffect(isFullScreen, controllerVisible.value, settings.pinScreen) {
-                    requestedOrientation = if (isFullScreen)
-                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                    else
-                        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-
-                    val insetsController = WindowCompat.getInsetsController(window, window.decorView)
-                    if (isFullScreen) {
-                        insetsController.hide(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
-                        insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    } else {
-                        insetsController.show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
-                    }
-                    if (controllerVisible.value)
-                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    else
-                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    val pinned = getSystemService(ActivityManager::class.java).lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
-                    val wantPinned = controllerVisible.value && settings.pinScreen
-                    try {
-                        if (wantPinned && !pinned) startLockTask()
-                        if (!wantPinned && pinned) stopLockTask()
-                    } catch (_: Exception) {}
-                }
-
-                if (controllerVisible.value) {
-                    val closeController = {
-                        controllerVisible.value = false
-                        previewLayout.value = null
-                    }
-                    // Some phones deliver an edge swipe as Back despite exclusion, so Back is ignored while blocking.
-                    BackHandler { if (!settings.blockEdgeGestures) closeController() }
-                    val playLayouts = androidx.compose.runtime.remember(layoutsRefreshKey.value, settings.activeLayoutId) {
-                        layoutRepo.getAll()
-                    }
-                    ControllerScreen(
-                        gamepad = gamepad,
-                        isWindowsMode = settings.isWindowsMode,
-                        connectedDeviceName = connectedDeviceName.value,
-                        connectionState = hidConnectionState.value,
-                        bluetoothOn = bluetoothOn.value,
-                        btAccess = btAccess.value,
-                        onRequestAccess = { requestBluetoothAccess() },
-                        onReconnect = { connectLastDevice() },
-                        onEnableBluetooth = { requestEnableBluetooth() },
-                        layout = previewLayout.value
-                            ?: layoutRepo.load(settings.activeLayoutId)
-                            ?: ControllerLayout.default(),
-                        // A Test preview shows unsaved edits, so switching layouts is not offered there.
-                        layouts = if (previewLayout.value == null) playLayouts else emptyList(),
-                        onLayoutSelect = { id -> settings.activeLayoutId = id },
-                        hapticIntensity = settings.hapticIntensity,
-                        motionEnabled = settings.motionEnabled,
-                        motionMode = settings.motionMode,
-                        motionSensitivity = settings.motionSensitivity,
-                        motionInvertX = settings.motionInvertX,
-                        motionInvertY = settings.motionInvertY,
-                        oledMode = settings.oledMode,
-                        blockEdgeGestures = settings.blockEdgeGestures,
-                        onStopClick = closeController
-                    )
-                } else if (editingLayout.value != null && editorSession.value != null) {
-                    LayoutEditorScreen(
-                        layout = editingLayout.value!!,
-                        session = editorSession.value!!,
-                        repo = layoutRepo,
-                        onBack = {
-                            editingLayout.value = null
-                            editorSession.value = null
-                            layoutsRefreshKey.value++
-                        },
-                        onTest = { testLayout ->
-                            // Preview only — never persisted. The session keeps the in-progress edits
-                            // (and undo/redo) alive while the controller is shown, so returning to the
-                            // editor restores everything exactly.
-                            previewLayout.value = testLayout
-                            controllerVisible.value = true
-                        }
-                    )
-                } else {
-                    val cs = MaterialTheme.colorScheme
-                    Scaffold(
-                            bottomBar = {
-                                NavigationBar(containerColor = cs.surfaceContainer) {
-                                    NavigationBarItem(
-                                        selected = currentTab.value == NavTab.CONNECT,
-                                        onClick = { currentTab.value = NavTab.CONNECT },
-                                        icon = { Icon(Icons.Default.Wifi, contentDescription = null) },
-                                        label = { Text("Connect", fontWeight = FontWeight.Medium) }
-                                    )
-                                    NavigationBarItem(
-                                        selected = currentTab.value == NavTab.LAYOUTS,
-                                        onClick = { currentTab.value = NavTab.LAYOUTS },
-                                        icon = { Icon(Icons.Default.GridView, contentDescription = null) },
-                                        label = { Text("Layouts", fontWeight = FontWeight.Medium) }
-                                    )
-                                    NavigationBarItem(
-                                        selected = currentTab.value == NavTab.SETTINGS,
-                                        onClick = { currentTab.value = NavTab.SETTINGS },
-                                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                        label = { Text("Settings", fontWeight = FontWeight.Medium) }
-                                    )
-                                }
-                            }
-                        ) { innerPadding ->
-                            // Each tab has its own Scaffold; consume the bottom inset so it is not applied twice.
-                            Box(Modifier.consumeWindowInsets(PaddingValues(bottom = innerPadding.calculateBottomPadding()))) {
-                                when (currentTab.value) {
-                                    NavTab.CONNECT -> ConnectionScreen(
-                                        onCancelDiscovery = { cancelDiscovery() },
-                                        getBondedDevices = { getBondedDevices() },
-                                        hidProfileConnected = hidProfileConnected.value,
-                                        hidAppRegistered = hidAppRegistered.value,
-                                        hidConnectionState = hidConnectionState.value,
-                                        connectedDeviceName = connectedDeviceName.value,
-                                        ownDeviceName = ownDeviceName.value,
-                                        onStartClick = { connectLastDevice() },
-                                        btAccess = btAccess.value,
-                                        onRequestAccess = { requestBluetoothAccess() },
-                                        connectingName = connectingName.value,
-                                        onCancelConnecting = { cancelConnecting() },
-                                        connectFailedName = connectFailedName.value,
-                                        onScan = { scanForDevices() },
-                                        onMakeVisible = { makeVisible() },
-                                        bluetoothOn = bluetoothOn.value,
-                                        onEnableBluetooth = { requestEnableBluetooth() },
-                                        onPairDevice = { device -> pairDevice(device) },
-                                        onUnpairDevice = { device -> unpairDevice(device) },
-                                        connectedDeviceAddress = gamepad?.connectedDevice?.address ?: "",
-                                        connectedDevice = gamepad?.connectedDevice,
-                                        lastDeviceAddress = settings.lastDeviceAddress ?: "",
-                                        showAllDevices = settings.showAllDevices,
-                                        onShowAllDevicesChange = { settings.showAllDevices = it },
-                                        activeDInputMode = gamepad?.isWindowsDInputMode ?: false,
-                                        onConnectDevice = { device -> connectTo(device) },
-                                        onCancelConnect = { device ->
-                                            userCancelledConnect = true
-                                            gamepad?.cancelConnect(device)
-                                        },
-                                        onDisconnectDevice = { device ->
-                                            userCancelledConnect = true
-                                            gamepad?.cancelConnect(device)
-                                        },
-                                        contentPadding = innerPadding
-                                    )
-                                    NavTab.LAYOUTS -> androidx.compose.runtime.key(layoutsRefreshKey.value) {
-                                        LayoutsScreen(
-                                            repo = layoutRepo,
-                                            connectedDeviceName = connectedDeviceName.value,
-                                            onStart = { layout ->
-                                                settings.activeLayoutId = layout.id
-                                                previewLayout.value = null
-                                                controllerVisible.value = true
-                                            },
-                                            onEdit = { layout ->
-                                                // Fresh working session for this edit; discarded on exit.
-                                                editorSession.value = EditorSession(layout)
-                                                editingLayout.value = layout
-                                            },
-                                            contentPadding = innerPadding
-                                        )
-                                    }
-                                    NavTab.SETTINGS -> SettingsScreen(
-                                        settings = settings,
-                                        appVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: "",
-                                        onWindowsModeChange = { value ->
-                                            settings.isWindowsMode = value
-                                            gamepad?.switchMode(value)
-                                        },
-                                        contentPadding = innerPadding
-                                    )
-                                }
-                            }
-                        }
+                ScreenModeEffects()
+                when {
+                    controllerVisible.value -> PlayContent()
+                    editingLayout.value != null && editorSession.value != null -> EditorContent()
+                    else -> MainTabs()
                 }
             }
         }
 
         if (btAccess.value == BtAccess.GRANTED) initGamepad()
+    }
+
+    @Composable
+    private fun ScreenModeEffects() {
+        val isFullScreen = controllerVisible.value || editingLayout.value != null
+        androidx.compose.runtime.LaunchedEffect(isFullScreen, controllerVisible.value, settings.pinScreen) {
+            requestedOrientation = if (isFullScreen)
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else
+                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+
+            val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+            if (isFullScreen) {
+                insetsController.hide(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+                insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            } else {
+                insetsController.show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+            }
+            if (controllerVisible.value)
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            else
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            val pinned = getSystemService(ActivityManager::class.java).lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
+            val wantPinned = controllerVisible.value && settings.pinScreen
+            try {
+                if (wantPinned && !pinned) startLockTask()
+                if (!wantPinned && pinned) stopLockTask()
+            } catch (_: Exception) {}
+        }
+    }
+
+    @Composable
+    private fun PlayContent() {
+        val closeController = {
+            controllerVisible.value = false
+            previewLayout.value = null
+        }
+        // Some phones deliver an edge swipe as Back despite exclusion, so Back is ignored while blocking.
+        BackHandler { if (!settings.blockEdgeGestures) closeController() }
+        val playLayouts = androidx.compose.runtime.remember(layoutsRefreshKey.value, settings.activeLayoutId) {
+            layoutRepo.getAll()
+        }
+        ControllerScreen(
+            gamepad = gamepad,
+            isWindowsMode = settings.isWindowsMode,
+            connectedDeviceName = connectedDeviceName.value,
+            connectionState = hidConnectionState.value,
+            bluetoothOn = bluetoothOn.value,
+            btAccess = btAccess.value,
+            onRequestAccess = { requestBluetoothAccess() },
+            onReconnect = { connectLastDevice() },
+            onEnableBluetooth = { requestEnableBluetooth() },
+            layout = previewLayout.value
+                ?: layoutRepo.load(settings.activeLayoutId)
+                ?: ControllerLayout.default(),
+            // A Test preview shows unsaved edits, so switching layouts is not offered there.
+            layouts = if (previewLayout.value == null) playLayouts else emptyList(),
+            onLayoutSelect = { id -> settings.activeLayoutId = id },
+            hapticIntensity = settings.hapticIntensity,
+            motionEnabled = settings.motionEnabled,
+            motionMode = settings.motionMode,
+            motionSensitivity = settings.motionSensitivity,
+            motionInvertX = settings.motionInvertX,
+            motionInvertY = settings.motionInvertY,
+            oledMode = settings.oledMode,
+            blockEdgeGestures = settings.blockEdgeGestures,
+            onStopClick = closeController
+        )
+    }
+
+    @Composable
+    private fun EditorContent() {
+        LayoutEditorScreen(
+            layout = editingLayout.value!!,
+            session = editorSession.value!!,
+            repo = layoutRepo,
+            onBack = {
+                editingLayout.value = null
+                editorSession.value = null
+                layoutsRefreshKey.value++
+            },
+            onTest = { testLayout ->
+                // Preview only — never persisted. The session keeps the in-progress edits
+                // (and undo/redo) alive while the controller is shown, so returning to the
+                // editor restores everything exactly.
+                previewLayout.value = testLayout
+                controllerVisible.value = true
+            }
+        )
+    }
+
+    @Composable
+    private fun MainTabs() {
+        val cs = MaterialTheme.colorScheme
+        Scaffold(
+            bottomBar = {
+                NavigationBar(containerColor = cs.surfaceContainer) {
+                    NavigationBarItem(
+                        selected = currentTab.value == NavTab.CONNECT,
+                        onClick = { currentTab.value = NavTab.CONNECT },
+                        icon = { Icon(Icons.Default.Wifi, contentDescription = null) },
+                        label = { Text("Connect", fontWeight = FontWeight.Medium) }
+                    )
+                    NavigationBarItem(
+                        selected = currentTab.value == NavTab.LAYOUTS,
+                        onClick = { currentTab.value = NavTab.LAYOUTS },
+                        icon = { Icon(Icons.Default.GridView, contentDescription = null) },
+                        label = { Text("Layouts", fontWeight = FontWeight.Medium) }
+                    )
+                    NavigationBarItem(
+                        selected = currentTab.value == NavTab.SETTINGS,
+                        onClick = { currentTab.value = NavTab.SETTINGS },
+                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                        label = { Text("Settings", fontWeight = FontWeight.Medium) }
+                    )
+                }
+            }
+        ) { innerPadding ->
+            // Each tab has its own Scaffold; consume the bottom inset so it is not applied twice.
+            Box(Modifier.consumeWindowInsets(PaddingValues(bottom = innerPadding.calculateBottomPadding()))) {
+                when (currentTab.value) {
+                    NavTab.CONNECT -> ConnectionScreen(
+                        onCancelDiscovery = { cancelDiscovery() },
+                        getBondedDevices = { getBondedDevices() },
+                        hidProfileConnected = hidProfileConnected.value,
+                        hidAppRegistered = hidAppRegistered.value,
+                        hidConnectionState = hidConnectionState.value,
+                        connectedDeviceName = connectedDeviceName.value,
+                        ownDeviceName = ownDeviceName.value,
+                        onStartClick = { connectLastDevice() },
+                        btAccess = btAccess.value,
+                        onRequestAccess = { requestBluetoothAccess() },
+                        connectingName = connectingName.value,
+                        onCancelConnecting = { cancelConnecting() },
+                        connectFailedName = connectFailedName.value,
+                        onScan = { scanForDevices() },
+                        onMakeVisible = { makeVisible() },
+                        bluetoothOn = bluetoothOn.value,
+                        onEnableBluetooth = { requestEnableBluetooth() },
+                        onPairDevice = { device -> pairDevice(device) },
+                        onUnpairDevice = { device -> unpairDevice(device) },
+                        connectedDeviceAddress = gamepad?.connectedDevice?.address ?: "",
+                        connectedDevice = gamepad?.connectedDevice,
+                        lastDeviceAddress = settings.lastDeviceAddress ?: "",
+                        showAllDevices = settings.showAllDevices,
+                        onShowAllDevicesChange = { settings.showAllDevices = it },
+                        activeDInputMode = gamepad?.isWindowsDInputMode ?: false,
+                        onConnectDevice = { device -> connectTo(device) },
+                        onCancelConnect = { device ->
+                            userCancelledConnect = true
+                            gamepad?.cancelConnect(device)
+                        },
+                        onDisconnectDevice = { device ->
+                            userCancelledConnect = true
+                            gamepad?.cancelConnect(device)
+                        },
+                        contentPadding = innerPadding
+                    )
+                    NavTab.LAYOUTS -> androidx.compose.runtime.key(layoutsRefreshKey.value) {
+                        LayoutsScreen(
+                            repo = layoutRepo,
+                            connectedDeviceName = connectedDeviceName.value,
+                            onStart = { layout ->
+                                settings.activeLayoutId = layout.id
+                                previewLayout.value = null
+                                controllerVisible.value = true
+                            },
+                            onEdit = { layout ->
+                                // Fresh working session for this edit; discarded on exit.
+                                editorSession.value = EditorSession(layout)
+                                editingLayout.value = layout
+                            },
+                            contentPadding = innerPadding
+                        )
+                    }
+                    NavTab.SETTINGS -> SettingsScreen(
+                        settings = settings,
+                        appVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: "",
+                        onWindowsModeChange = { value ->
+                            settings.isWindowsMode = value
+                            gamepad?.switchMode(value)
+                        },
+                        contentPadding = innerPadding
+                    )
+                }
+            }
+        }
     }
 
     private fun granted(permission: String) =
