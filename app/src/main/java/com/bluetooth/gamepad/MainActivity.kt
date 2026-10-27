@@ -299,7 +299,8 @@ class MainActivity : ComponentActivity() {
                             Box(Modifier.consumeWindowInsets(PaddingValues(bottom = innerPadding.calculateBottomPadding()))) {
                                 when (currentTab.value) {
                                     NavTab.CONNECT -> ConnectionScreen(
-                                        activity = this@MainActivity,
+                                        onCancelDiscovery = { cancelDiscovery() },
+                                        getBondedDevices = { getBondedDevices() },
                                         hidProfileConnected = hidProfileConnected.value,
                                         hidAppRegistered = hidAppRegistered.value,
                                         hidConnectionState = hidConnectionState.value,
@@ -473,7 +474,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun initGamepad() {
+    private fun initGamepad() {
         // The service can stop the gamepad without this activity being destroyed.
         if (gamepad !== BluetoothHidGamepad.current) gamepad = null
         if (gamepad == null) {
@@ -588,7 +589,7 @@ class MainActivity : ComponentActivity() {
         } catch (_: SecurityException) { false }
     }
 
-    fun getBondedDevices(): List<BluetoothDevice> {
+    private fun getBondedDevices(): List<BluetoothDevice> {
         return try {
             val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
             manager?.adapter?.bondedDevices?.toList() ?: emptyList()
@@ -597,14 +598,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun startDiscovery() {
+    private fun startDiscovery() {
         try {
             val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
             manager?.adapter?.startDiscovery()
         } catch (_: SecurityException) { }
     }
 
-    fun cancelDiscovery() {
+    private fun cancelDiscovery() {
         try {
             val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
             manager?.adapter?.cancelDiscovery()
@@ -631,7 +632,7 @@ class MainActivity : ComponentActivity() {
         } catch (_: SecurityException) { }
     }
 
-    fun unpairDevice(device: BluetoothDevice) {
+    private fun unpairDevice(device: BluetoothDevice) {
         try {
             @Suppress("DiscouragedPrivateApi")
             val method: Method = device.javaClass.getMethod("removeBond")

@@ -1,7 +1,6 @@
 package com.bluetooth.gamepad.connection
 
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothClass
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
@@ -77,7 +76,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.bluetooth.gamepad.MainActivity
 import com.bluetooth.gamepad.bluetooth.BtAccess
 import com.bluetooth.gamepad.ui.theme.StatusConnected
 import com.bluetooth.gamepad.ui.theme.StatusConnecting
@@ -85,7 +83,8 @@ import com.bluetooth.gamepad.ui.theme.StatusError
 
 @Composable
 fun ConnectionScreen(
-    activity: MainActivity,
+    onCancelDiscovery: () -> Unit,
+    getBondedDevices: () -> List<BluetoothDevice>,
     hidProfileConnected: Boolean,
     hidAppRegistered: Boolean,
     hidConnectionState: Int,
@@ -129,14 +128,14 @@ fun ConnectionScreen(
             connectingAddress.value = null
         }
         if (hidConnectionState == BluetoothProfile.STATE_CONNECTED) {
-            activity.cancelDiscovery()
+            onCancelDiscovery()
         }
     }
 
     // Paired devices cannot be read while Bluetooth is off or access is missing, so reload when either changes.
     LaunchedEffect(bluetoothOn, btAccess) {
         devices.clear()
-        devices.addAll(activity.getBondedDevices())
+        devices.addAll(getBondedDevices())
     }
 
     DisposableEffect(Unit) {
@@ -183,7 +182,7 @@ fun ConnectionScreen(
             androidx.core.content.ContextCompat.RECEIVER_EXPORTED
         )
         onDispose {
-            activity.cancelDiscovery()
+            onCancelDiscovery()
             try { context.unregisterReceiver(receiver) } catch (_: Exception) { }
         }
     }
@@ -698,45 +697,22 @@ private fun buildStatusLabel(
 // Picks an icon from the class a device advertises; unknown or unreadable classes keep the Bluetooth icon.
 private fun deviceIcon(device: BluetoothDevice): ImageVector {
     val cls = try { device.bluetoothClass } catch (_: SecurityException) { null } ?: return Icons.Default.Bluetooth
-    val minor = cls.deviceClass
-    return when (cls.majorDeviceClass) {
-        BluetoothClass.Device.Major.COMPUTER ->
-            if (minor == BluetoothClass.Device.COMPUTER_LAPTOP) Icons.Default.Laptop else Icons.Default.Computer
-        BluetoothClass.Device.Major.PHONE -> Icons.Default.Smartphone
-        BluetoothClass.Device.Major.AUDIO_VIDEO -> when (minor) {
-            BluetoothClass.Device.AUDIO_VIDEO_HEADPHONES,
-            BluetoothClass.Device.AUDIO_VIDEO_WEARABLE_HEADSET,
-            BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE -> Icons.Default.Headphones
-            BluetoothClass.Device.AUDIO_VIDEO_VIDEO_DISPLAY_AND_LOUDSPEAKER,
-            BluetoothClass.Device.AUDIO_VIDEO_VIDEO_MONITOR,
-            BluetoothClass.Device.AUDIO_VIDEO_SET_TOP_BOX -> Icons.Default.Tv
-            else -> Icons.Default.Speaker
-        }
-        BluetoothClass.Device.Major.WEARABLE -> Icons.Default.Watch
-        // Peripheral minor bits: 0x40 keyboard, 0x80 pointing device; the rest are gamepads and similar.
-        BluetoothClass.Device.Major.PERIPHERAL -> when {
-            minor and 0x40 != 0 -> Icons.Default.Keyboard
-            minor and 0x80 != 0 -> Icons.Default.Mouse
-            else -> Icons.Default.SportsEsports
-        }
-        else -> Icons.Default.Bluetooth
+    return when (deviceKind(cls.majorDeviceClass, cls.deviceClass)) {
+        DeviceKind.LAPTOP -> Icons.Default.Laptop
+        DeviceKind.COMPUTER -> Icons.Default.Computer
+        DeviceKind.PHONE -> Icons.Default.Smartphone
+        DeviceKind.HEADPHONES -> Icons.Default.Headphones
+        DeviceKind.SCREEN -> Icons.Default.Tv
+        DeviceKind.SPEAKER -> Icons.Default.Speaker
+        DeviceKind.WEARABLE -> Icons.Default.Watch
+        DeviceKind.KEYBOARD -> Icons.Default.Keyboard
+        DeviceKind.MOUSE -> Icons.Default.Mouse
+        DeviceKind.GAMEPAD -> Icons.Default.SportsEsports
+        DeviceKind.OTHER -> Icons.Default.Bluetooth
     }
 }
 
-// Audio gear, input devices and wearables never host a gamepad; unknown classes stay visible since some hosts report none.
 private fun isLikelyHost(device: BluetoothDevice): Boolean {
     val cls = try { device.bluetoothClass } catch (_: SecurityException) { null } ?: return true
-    return when (cls.majorDeviceClass) {
-        BluetoothClass.Device.Major.AUDIO_VIDEO -> cls.deviceClass in setOf(
-            BluetoothClass.Device.AUDIO_VIDEO_VIDEO_DISPLAY_AND_LOUDSPEAKER,
-            BluetoothClass.Device.AUDIO_VIDEO_VIDEO_MONITOR,
-            BluetoothClass.Device.AUDIO_VIDEO_SET_TOP_BOX
-        )
-        BluetoothClass.Device.Major.PERIPHERAL,
-        BluetoothClass.Device.Major.WEARABLE,
-        BluetoothClass.Device.Major.HEALTH,
-        BluetoothClass.Device.Major.IMAGING,
-        BluetoothClass.Device.Major.TOY -> false
-        else -> true
-    }
+    return isLikelyHostClass(cls.majorDeviceClass, cls.deviceClass)
 }
