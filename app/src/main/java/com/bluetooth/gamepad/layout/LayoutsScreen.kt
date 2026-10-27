@@ -170,63 +170,12 @@ fun LayoutsScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
-            // Inline header
             item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "Layouts",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.3).sp,
-                        color = cs.onSurface
-                    )
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { openLauncher.launch(arrayOf("application/json", "text/*", "application/octet-stream")) }) {
-                        Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Import", fontWeight = FontWeight.Bold)
-                    }
-                }
-                Text(
-                    "Pick a control layout or tailor one to your game.",
-                    fontSize = 14.sp,
-                    color = cs.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-                )
-                Spacer(Modifier.height(12.dp))
+                LayoutsHeader(onImport = { openLauncher.launch(arrayOf("application/json", "text/*", "application/octet-stream")) })
             }
 
-            // Connected device banner
             if (connectedDeviceName.isNotEmpty()) {
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(cs.primaryContainer.copy(alpha = 0.5f))
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(cs.primary, RoundedCornerShape(50))
-                        )
-                        Text(
-                            "Connected: $connectedDeviceName",
-                            fontSize = 13.sp,
-                            color = cs.onPrimaryContainer,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
+                item { ConnectedBanner(connectedDeviceName) }
             }
 
             // YOUR LAYOUTS section label
@@ -243,160 +192,268 @@ fun LayoutsScreen(
 
             // Layout list
             items(layouts, key = { it.id }) { layout ->
-                val initials = layout.name.take(2).uppercase()
-                val isAlt = layout.name.startsWith("FC", ignoreCase = true)
-                val badgeBg = if (isAlt) cs.tertiaryContainer else cs.primaryContainer
-                val badgeFg = if (isAlt) cs.onTertiaryContainer else cs.onPrimaryContainer
-                val expanded = menuFor.value == layout.id
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 8.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(cs.surfaceContainerLow)
-                        .border(1.dp, cs.outlineVariant, RoundedCornerShape(20.dp))
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onStart(layout) }
-                            .padding(start = 18.dp, end = 8.dp, top = 16.dp, bottom = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .background(badgeBg, RoundedCornerShape(14.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                initials,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                letterSpacing = 0.5.sp,
-                                color = badgeFg
-                            )
-                        }
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                layout.name,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = cs.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                "${layout.buttons.size} buttons",
-                                fontSize = 12.sp,
-                                color = cs.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 2.dp)
-                            )
-                        }
-
-                        IconButton(onClick = { menuFor.value = if (expanded) null else layout.id }) {
-                            Icon(
-                                if (expanded) Icons.Default.ExpandLess else Icons.Default.MoreVert,
-                                contentDescription = "More",
-                                tint = cs.onSurface
-                            )
-                        }
+                LayoutCard(
+                    layout = layout,
+                    expanded = menuFor.value == layout.id,
+                    onStart = { onStart(layout) },
+                    onToggle = { menuFor.value = if (menuFor.value == layout.id) null else layout.id },
+                    onEdit = {
+                        menuFor.value = null
+                        onEdit(layout)
+                    },
+                    onDuplicate = {
+                        menuFor.value = null
+                        repo.duplicate(layout)
+                        reload()
+                    },
+                    onShare = {
+                        menuFor.value = null
+                        shareLayout(layout)
+                    },
+                    onExport = {
+                        menuFor.value = null
+                        pendingExportId.value = layout.id
+                        saveLauncher.launch(exportFileName(layout))
+                    },
+                    onDelete = {
+                        menuFor.value = null
+                        deleteTarget.value = layout
                     }
-
-                    AnimatedVisibility(visible = expanded) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 8.dp, end = 8.dp, bottom = 8.dp)
-                        ) {
-                            val action = Modifier.weight(1f)
-                            LayoutAction(Icons.Default.Edit, "Edit", cs.onSurface, action) {
-                                menuFor.value = null
-                                onEdit(layout)
-                            }
-                            LayoutAction(Icons.Default.ContentCopy, "Duplicate", cs.onSurface, action) {
-                                menuFor.value = null
-                                repo.duplicate(layout)
-                                reload()
-                            }
-                            LayoutAction(Icons.Default.Share, "Share", cs.onSurface, action) {
-                                menuFor.value = null
-                                shareLayout(layout)
-                            }
-                            LayoutAction(Icons.Default.Upload, "Export", cs.onSurface, action) {
-                                menuFor.value = null
-                                pendingExportId.value = layout.id
-                                saveLauncher.launch(exportFileName(layout))
-                            }
-                            if (!layout.isDefault) {
-                                LayoutAction(Icons.Default.Delete, "Delete", cs.error, action) {
-                                    menuFor.value = null
-                                    deleteTarget.value = layout
-                                }
-                            }
-                        }
-                    }
-                }
+                )
             }
 
         }
     }
 
     if (showNewDialog.value) {
-        AlertDialog(
-            onDismissRequest = { showNewDialog.value = false },
-            title = { Text("New Layout") },
-            text = {
-                OutlinedTextField(
-                    value = newName.value,
-                    onValueChange = { newName.value = it },
-                    label = { Text("Layout name") },
-                    singleLine = true
-                )
+        NewLayoutDialog(
+            name = newName.value,
+            onNameChange = { newName.value = it },
+            onCreate = {
+                val name = newName.value.trim()
+                if (name.isNotEmpty()) {
+                    val layout = repo.newCustom(name)
+                    repo.save(layout)
+                    reload()
+                    showNewDialog.value = false
+                }
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val name = newName.value.trim()
-                        if (name.isNotEmpty()) {
-                            val layout = repo.newCustom(name)
-                            repo.save(layout)
-                            reload()
-                            showNewDialog.value = false
-                        }
-                    },
-                    enabled = newName.value.isNotBlank()
-                ) { Text("Create") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showNewDialog.value = false }) { Text("Cancel") }
-            }
+            onDismiss = { showNewDialog.value = false }
         )
     }
 
     deleteTarget.value?.let { layout ->
-        AlertDialog(
-            onDismissRequest = { deleteTarget.value = null },
-            title = { Text("Delete Layout") },
-            text = { Text("Delete \"${layout.name}\"? This cannot be undone.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        repo.delete(layout.id)
-                        reload()
-                        deleteTarget.value = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = cs.error)
-                ) { Text("Delete", color = cs.onError) }
+        DeleteLayoutDialog(
+            layout = layout,
+            onConfirm = {
+                repo.delete(layout.id)
+                reload()
+                deleteTarget.value = null
             },
-            dismissButton = {
-                TextButton(onClick = { deleteTarget.value = null }) { Text("Cancel") }
-            }
+            onDismiss = { deleteTarget.value = null }
         )
     }
+}
+
+@Composable
+private fun LayoutsHeader(onImport: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "Layouts",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.3).sp,
+            color = cs.onSurface
+        )
+        Spacer(Modifier.weight(1f))
+        TextButton(onClick = onImport) {
+            Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Import", fontWeight = FontWeight.Bold)
+        }
+    }
+    Text(
+        "Pick a control layout or tailor one to your game.",
+        fontSize = 14.sp,
+        color = cs.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+    )
+    Spacer(Modifier.height(12.dp))
+}
+
+@Composable
+private fun ConnectedBanner(connectedDeviceName: String) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(cs.primaryContainer.copy(alpha = 0.5f))
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(cs.primary, RoundedCornerShape(50))
+        )
+        Text(
+            "Connected: $connectedDeviceName",
+            fontSize = 13.sp,
+            color = cs.onPrimaryContainer,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun LayoutCard(
+    layout: ControllerLayout,
+    expanded: Boolean,
+    onStart: () -> Unit,
+    onToggle: () -> Unit,
+    onEdit: () -> Unit,
+    onDuplicate: () -> Unit,
+    onShare: () -> Unit,
+    onExport: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val cs = MaterialTheme.colorScheme
+    val initials = layout.name.take(2).uppercase()
+    val isAlt = layout.name.startsWith("FC", ignoreCase = true)
+    val badgeBg = if (isAlt) cs.tertiaryContainer else cs.primaryContainer
+    val badgeFg = if (isAlt) cs.onTertiaryContainer else cs.onPrimaryContainer
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(cs.surfaceContainerLow)
+            .border(1.dp, cs.outlineVariant, RoundedCornerShape(20.dp))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onStart() }
+                .padding(start = 18.dp, end = 8.dp, top = 16.dp, bottom = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(badgeBg, RoundedCornerShape(14.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    initials,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.5.sp,
+                    color = badgeFg
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    layout.name,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = cs.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "${layout.buttons.size} buttons",
+                    fontSize = 12.sp,
+                    color = cs.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+
+            IconButton(onClick = onToggle) {
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.MoreVert,
+                    contentDescription = "More",
+                    tint = cs.onSurface
+                )
+            }
+        }
+
+        AnimatedVisibility(visible = expanded) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 8.dp, end = 8.dp, bottom = 8.dp)
+            ) {
+                val action = Modifier.weight(1f)
+                LayoutAction(Icons.Default.Edit, "Edit", cs.onSurface, action) { onEdit() }
+                LayoutAction(Icons.Default.ContentCopy, "Duplicate", cs.onSurface, action) { onDuplicate() }
+                LayoutAction(Icons.Default.Share, "Share", cs.onSurface, action) { onShare() }
+                LayoutAction(Icons.Default.Upload, "Export", cs.onSurface, action) { onExport() }
+                if (!layout.isDefault) {
+                    LayoutAction(Icons.Default.Delete, "Delete", cs.error, action) { onDelete() }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NewLayoutDialog(
+    name: String,
+    onNameChange: (String) -> Unit,
+    onCreate: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New Layout") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = onNameChange,
+                label = { Text("Layout name") },
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = onCreate,
+                enabled = name.isNotBlank()
+            ) { Text("Create") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun DeleteLayoutDialog(layout: ControllerLayout, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete Layout") },
+        text = { Text("Delete \"${layout.name}\"? This cannot be undone.") },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = ButtonDefaults.buttonColors(containerColor = cs.error)
+            ) { Text("Delete", color = cs.onError) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable
