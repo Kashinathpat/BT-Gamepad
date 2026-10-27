@@ -1,9 +1,11 @@
 package com.bluetooth.gamepad.settings
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,10 +34,12 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bluetooth.gamepad.motion.MotionMode
@@ -55,6 +60,13 @@ import com.bluetooth.gamepad.motion.MotionSensorManager
 import com.bluetooth.gamepad.ui.theme.AppTheme
 import com.bluetooth.gamepad.util.HapticIntensity
 import com.bluetooth.gamepad.util.obtainVibrator
+
+private val themeOptions = listOf(
+    Triple(AppTheme.LIGHT, "Light", Icons.Default.LightMode),
+    Triple(AppTheme.DARK, "Dark", Icons.Default.DarkMode),
+    Triple(AppTheme.AMOLED, "AMOLED", Icons.Default.SmartDisplay),
+    Triple(AppTheme.SYSTEM, "System", Icons.Default.SettingsBrightness)
+)
 
 @Composable
 fun SettingsScreen(
@@ -73,7 +85,6 @@ fun SettingsScreen(
                 .padding(bottom = contentPadding.calculateBottomPadding())
                 .verticalScroll(rememberScrollState())
         ) {
-            // Inline header
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -89,17 +100,7 @@ fun SettingsScreen(
                 )
             }
 
-            // APPEARANCE section
-            SectionLabel("APPEARANCE")
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(cs.surfaceContainerLow)
-                    .padding(14.dp)
-            ) {
+            SettingsSection("APPEARANCE", innerPadding = 14.dp) {
                 Text(
                     "Theme",
                     fontSize = 14.sp,
@@ -111,53 +112,20 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    ThemeButton(
-                        modifier = Modifier.weight(1f),
-                        label = "Light",
-                        icon = Icons.Default.LightMode,
-                        selected = settings.appTheme == AppTheme.LIGHT,
-                        cs = cs,
-                        onClick = { settings.appTheme = AppTheme.LIGHT }
-                    )
-                    ThemeButton(
-                        modifier = Modifier.weight(1f),
-                        label = "Dark",
-                        icon = Icons.Default.DarkMode,
-                        selected = settings.appTheme == AppTheme.DARK,
-                        cs = cs,
-                        onClick = { settings.appTheme = AppTheme.DARK }
-                    )
-                    ThemeButton(
-                        modifier = Modifier.weight(1f),
-                        label = "AMOLED",
-                        icon = Icons.Default.SmartDisplay,
-                        selected = settings.appTheme == AppTheme.AMOLED,
-                        cs = cs,
-                        onClick = { settings.appTheme = AppTheme.AMOLED }
-                    )
-                    ThemeButton(
-                        modifier = Modifier.weight(1f),
-                        label = "System",
-                        icon = Icons.Default.SettingsBrightness,
-                        selected = settings.appTheme == AppTheme.SYSTEM,
-                        cs = cs,
-                        onClick = { settings.appTheme = AppTheme.SYSTEM }
-                    )
+                    themeOptions.forEach { (theme, label, icon) ->
+                        ThemeButton(
+                            modifier = Modifier.weight(1f),
+                            label = label,
+                            icon = icon,
+                            selected = settings.appTheme == theme,
+                            cs = cs,
+                            onClick = { settings.appTheme = theme }
+                        )
+                    }
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
-
-            // GAMEPLAY section
-            SectionLabel("GAMEPLAY")
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(cs.surfaceContainerLow)
-            ) {
+            SettingsSection("GAMEPLAY") {
                 SettingsRowToggle(
                     icon = Icons.Default.Games,
                     iconBg = cs.secondaryContainer,
@@ -184,17 +152,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(Modifier.height(24.dp))
-
-            SectionLabel("PLAY SCREEN")
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(cs.surfaceContainerLow)
-            ) {
+            SettingsSection("PLAY SCREEN") {
                 SettingsRowToggle(
                     icon = Icons.Default.DarkMode,
                     iconBg = cs.secondaryContainer,
@@ -226,18 +184,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(Modifier.height(24.dp))
-
-            // MOTION section
-            SectionLabel("MOTION")
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(cs.surfaceContainerLow)
-            ) {
+            SettingsSection("MOTION") {
                 SettingsRowToggle(
                     icon = Icons.Default.Sensors,
                     iconBg = cs.tertiaryContainer,
@@ -285,18 +232,7 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(Modifier.height(24.dp))
-
-            // CONNECTION section
-            SectionLabel("CONNECTION")
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(cs.surfaceContainerLow)
-            ) {
+            SettingsSection("CONNECTION") {
                 SettingsRowInfo(
                     icon = Icons.Default.Phonelink,
                     iconBg = cs.primaryContainer,
@@ -308,18 +244,7 @@ fun SettingsScreen(
                 )
             }
 
-            Spacer(Modifier.height(24.dp))
-
-            // ABOUT section
-            SectionLabel("ABOUT")
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(cs.surfaceContainerLow)
-            ) {
+            SettingsSection("ABOUT", bottomGap = 16.dp) {
                 SettingsRowInfo(
                     icon = Icons.AutoMirrored.Filled.HelpOutline,
                     iconBg = cs.surfaceContainerHigh,
@@ -338,8 +263,103 @@ fun SettingsScreen(
                     trailingColor = cs.onSurfaceVariant
                 )
             }
+        }
+    }
+}
 
-            Spacer(Modifier.height(16.dp))
+@Composable
+private fun SettingsSection(
+    title: String,
+    bottomGap: Dp = 24.dp,
+    innerPadding: Dp = 0.dp,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    SectionLabel(title)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(innerPadding),
+        content = content
+    )
+    Spacer(Modifier.height(bottomGap))
+}
+
+private fun Modifier.settingsRowPadding(): Modifier = padding(horizontal = 16.dp, vertical = 14.dp)
+
+@Composable
+private fun IconBadge(icon: ImageVector, bg: Color, fg: Color) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .background(bg, RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(imageVector = icon, contentDescription = null, tint = fg, modifier = Modifier.size(20.dp))
+    }
+}
+
+@Composable
+private fun SettingsRowHeader(
+    icon: ImageVector,
+    iconBg: Color,
+    iconFg: Color,
+    title: String,
+    sub: String?,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    subColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    trailing: (@Composable () -> Unit)? = null
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        IconBadge(icon, iconBg, iconFg)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+            if (sub != null) {
+                Text(sub, fontSize = 12.sp, color = subColor, modifier = Modifier.padding(top = 1.dp))
+            }
+        }
+        trailing?.invoke()
+    }
+}
+
+private class ChipOption<T>(val value: T, val label: String, val enabled: Boolean = true)
+
+@Composable
+private fun <T> ChoiceChips(options: List<ChipOption<T>>, selected: T, onSelect: (T) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { option ->
+            val active = option.value == selected && option.enabled
+            Surface(
+                onClick = { if (option.enabled) onSelect(option.value) },
+                enabled = option.enabled,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp),
+                shape = RoundedCornerShape(999.dp),
+                color = if (active) cs.primary else cs.surfaceContainerHigh,
+                border = if (active) null else BorderStroke(1.dp, cs.outlineVariant)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        option.label,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (active) cs.onPrimary else cs.onSurface
+                    )
+                }
+            }
         }
     }
 }
@@ -353,71 +373,30 @@ private fun HapticIntensityRow(
     val context = LocalContext.current
     val hasVibrator = remember { obtainVibrator(context).hasVibrator() }
 
-    val options = listOf(
-        HapticIntensity.OFF    to "Off",
-        HapticIntensity.LIGHT  to "Light",
-        HapticIntensity.MEDIUM to "Medium",
-        HapticIntensity.STRONG to "Strong",
-    )
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .alpha(if (hasVibrator) 1f else 0.4f)
-            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .settingsRowPadding()
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(cs.tertiaryContainer, RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.Vibration, contentDescription = null, tint = cs.onTertiaryContainer, modifier = Modifier.size(20.dp))
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Haptic feedback", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
-                Text(
-                    if (hasVibrator) "Button press vibration" else "Not supported on this device",
-                    fontSize = 12.sp,
-                    color = if (hasVibrator) cs.onSurfaceVariant else cs.error,
-                    modifier = Modifier.padding(top = 1.dp)
-                )
-            }
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            options.forEach { (value, label) ->
-                val selected = intensity == value
-                androidx.compose.material3.Surface(
-                    onClick = { if (hasVibrator) onChange(value) },
-                    enabled = hasVibrator,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(36.dp),
-                    shape = RoundedCornerShape(999.dp),
-                    color = if (selected && hasVibrator) cs.primary else cs.surfaceContainerHigh,
-                    border = if (selected && hasVibrator) null else androidx.compose.foundation.BorderStroke(1.dp, cs.outlineVariant)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            label,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (selected && hasVibrator) cs.onPrimary else cs.onSurface
-                        )
-                    }
-                }
-            }
-        }
+        SettingsRowHeader(
+            icon = Icons.Default.Vibration,
+            iconBg = cs.tertiaryContainer,
+            iconFg = cs.onTertiaryContainer,
+            title = "Haptic feedback",
+            sub = if (hasVibrator) "Button press vibration" else "Not supported on this device",
+            subColor = if (hasVibrator) cs.onSurfaceVariant else cs.error
+        )
+        ChoiceChips(
+            options = listOf(
+                ChipOption(HapticIntensity.OFF, "Off", hasVibrator),
+                ChipOption(HapticIntensity.LIGHT, "Light", hasVibrator),
+                ChipOption(HapticIntensity.MEDIUM, "Medium", hasVibrator),
+                ChipOption(HapticIntensity.STRONG, "Strong", hasVibrator)
+            ),
+            selected = intensity,
+            onSelect = onChange
+        )
     }
 }
 
@@ -427,19 +406,19 @@ private fun ThemeButton(
     label: String,
     icon: ImageVector,
     selected: Boolean,
-    cs: androidx.compose.material3.ColorScheme,
+    cs: ColorScheme,
     onClick: () -> Unit
 ) {
-    androidx.compose.material3.Surface(
+    Surface(
         onClick = onClick,
         modifier = modifier.height(72.dp),
         shape = RoundedCornerShape(14.dp),
         color = if (selected) cs.primaryContainer else cs.surfaceContainerLow,
         tonalElevation = 0.dp,
         border = if (selected)
-            androidx.compose.foundation.BorderStroke(2.dp, cs.primary)
+            BorderStroke(2.dp, cs.primary)
         else
-            androidx.compose.foundation.BorderStroke(1.dp, cs.outlineVariant)
+            BorderStroke(1.dp, cs.outlineVariant)
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -473,31 +452,18 @@ private fun SettingsRowToggle(
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean = true
 ) {
-    val cs = MaterialTheme.colorScheme
-    Row(
+    SettingsRowHeader(
+        icon = icon,
+        iconBg = iconBg,
+        iconFg = iconFg,
+        title = title,
+        sub = sub,
         modifier = Modifier
             .fillMaxWidth()
             .alpha(if (enabled) 1f else 0.4f)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .background(iconBg, RoundedCornerShape(12.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(imageVector = icon, contentDescription = null, tint = iconFg, modifier = Modifier.size(20.dp))
-        }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
-            if (sub != null) {
-                Text(sub, fontSize = 12.sp, color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 1.dp))
-            }
-        }
-        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
-    }
+            .settingsRowPadding(),
+        trailing = { Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled) }
+    )
 }
 
 @Composable
@@ -510,32 +476,19 @@ private fun SettingsRowInfo(
     trailingText: String? = null,
     trailingColor: Color = MaterialTheme.colorScheme.onSurfaceVariant
 ) {
-    val cs = MaterialTheme.colorScheme
-    Row(
+    SettingsRowHeader(
+        icon = icon,
+        iconBg = iconBg,
+        iconFg = iconFg,
+        title = title,
+        sub = sub,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .background(iconBg, RoundedCornerShape(12.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(imageVector = icon, contentDescription = null, tint = iconFg, modifier = Modifier.size(20.dp))
-        }
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
-            if (sub != null) {
-                Text(sub, fontSize = 12.sp, color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 1.dp))
-            }
-        }
-        if (trailingText != null) {
-            Text(trailingText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = trailingColor)
-        }
-    }
+            .settingsRowPadding(),
+        trailing = if (trailingText != null) {
+            { Text(trailingText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = trailingColor) }
+        } else null
+    )
 }
 
 @Composable
@@ -562,37 +515,17 @@ private fun MotionSensitivityRow(
     val max = MotionSensorManager.SENS_MAX_DPS
     val sliderValue = 1f - (sensitivity.coerceIn(min, max) - min) / (max - min)
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp)
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(cs.tertiaryContainer, RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.Sensors, contentDescription = null, tint = cs.onTertiaryContainer, modifier = Modifier.size(20.dp))
+    Column(modifier = Modifier.fillMaxWidth().settingsRowPadding()) {
+        SettingsRowHeader(
+            icon = Icons.Default.Sensors,
+            iconBg = cs.tertiaryContainer,
+            iconFg = cs.onTertiaryContainer,
+            title = "Sensitivity",
+            sub = when {
+                mode == MotionMode.STEERING -> "Full lock at ${(32f * sensitivity / 90f).toInt()} deg tilt"
+                else -> "Full deflection at ${sensitivity.toInt()} deg/s"
             }
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Sensitivity", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
-                Text(
-                    when {
-                        mode == MotionMode.STEERING -> "Full lock at ${(32f * sensitivity / 90f).toInt()} deg tilt"
-                        else -> "Full deflection at ${sensitivity.toInt()} deg/s"
-                    },
-                    fontSize = 12.sp,
-                    color = cs.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 1.dp)
-                )
-            }
-        }
+        )
         Slider(
             value = sliderValue,
             onValueChange = { v -> onChange(max - v * (max - min)) },
@@ -616,71 +549,22 @@ private fun MotionModeRow(
     val context = LocalContext.current
     val manager = remember { MotionSensorManager(context) }
 
-    val options = listOf(
-        MotionMode.AIM to "Aim",
-        MotionMode.STEERING to "Steering",
-    )
+    // Each mode rides a different sensor, so one can be missing while the other works.
+    val options = listOf(MotionMode.AIM to "Aim", MotionMode.STEERING to "Steering").map { (value, label) ->
+        val available = manager.isModeAvailable(value)
+        ChipOption(value, if (available) label else "$label (n/a)", available)
+    }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp)
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(cs.tertiaryContainer, RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Default.ScreenRotation, contentDescription = null, tint = cs.onTertiaryContainer, modifier = Modifier.size(20.dp))
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text("Motion mode", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = cs.onSurface)
-                Text(
-                    if (mode == MotionMode.STEERING) "Tilt the phone like a wheel"
-                    else "Aim follows how fast you turn; stops when you stop",
-                    fontSize = 12.sp,
-                    color = cs.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 1.dp)
-                )
-            }
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            options.forEach { (value, label) ->
-                // Each mode rides a different sensor, so one can be missing while the other works.
-                val available = manager.isModeAvailable(value)
-                val selected = mode == value
-                androidx.compose.material3.Surface(
-                    onClick = { if (available) onChange(value) },
-                    enabled = available,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(36.dp),
-                    shape = RoundedCornerShape(999.dp),
-                    color = if (selected && available) cs.primary else cs.surfaceContainerHigh,
-                    border = if (selected && available) null else androidx.compose.foundation.BorderStroke(1.dp, cs.outlineVariant)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            if (available) label else "$label (n/a)",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (selected && available) cs.onPrimary else cs.onSurface
-                        )
-                    }
-                }
-            }
-        }
+    Column(modifier = Modifier.fillMaxWidth().settingsRowPadding()) {
+        SettingsRowHeader(
+            icon = Icons.Default.ScreenRotation,
+            iconBg = cs.tertiaryContainer,
+            iconFg = cs.onTertiaryContainer,
+            title = "Motion mode",
+            sub = if (mode == MotionMode.STEERING) "Tilt the phone like a wheel"
+            else "Aim follows how fast you turn; stops when you stop"
+        )
+        ChoiceChips(options = options, selected = mode, onSelect = onChange)
     }
 }
 
