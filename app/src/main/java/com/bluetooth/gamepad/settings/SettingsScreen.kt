@@ -85,185 +85,234 @@ fun SettingsScreen(
                 .padding(bottom = contentPadding.calculateBottomPadding())
                 .verticalScroll(rememberScrollState())
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Settings",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.3).sp,
-                    color = cs.onSurface
-                )
-            }
+            SettingsTitle()
 
-            SettingsSection("APPEARANCE", innerPadding = 14.dp) {
-                Text(
-                    "Theme",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = cs.onSurface,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    themeOptions.forEach { (theme, label, icon) ->
-                        ThemeButton(
-                            modifier = Modifier.weight(1f),
-                            label = label,
-                            icon = icon,
-                            selected = settings.appTheme == theme,
-                            cs = cs,
-                            onClick = { settings.appTheme = theme }
-                        )
-                    }
-                }
-            }
+            AppearanceSection(settings)
 
-            SettingsSection("GAMEPLAY") {
-                SettingsRowToggle(
-                    icon = Icons.Default.Games,
-                    iconBg = cs.secondaryContainer,
-                    iconFg = cs.onSecondaryContainer,
-                    title = "Windows DInput mode",
-                    sub = "Legacy controller compatibility",
-                    checked = settings.isWindowsMode,
-                    onCheckedChange = onWindowsModeChange
-                )
-                Divider(cs.outlineVariant)
-                HapticIntensityRow(
-                    intensity = settings.hapticIntensity,
-                    onChange = { settings.hapticIntensity = it }
-                )
-                Divider(cs.outlineVariant)
-                SettingsRowToggle(
-                    icon = Icons.Default.Bluetooth,
-                    iconBg = cs.primaryContainer,
-                    iconFg = cs.onPrimaryContainer,
-                    title = "Auto-reconnect",
-                    sub = "Resume last device on launch",
-                    checked = settings.autoReconnect,
-                    onCheckedChange = { settings.autoReconnect = it }
-                )
-            }
+            GameplaySection(settings, onWindowsModeChange)
 
-            SettingsSection("PLAY SCREEN") {
-                SettingsRowToggle(
-                    icon = Icons.Default.DarkMode,
-                    iconBg = cs.secondaryContainer,
-                    iconFg = cs.onSecondaryContainer,
-                    title = "OLED mode",
-                    sub = "Black background with dim outline controls",
-                    checked = settings.oledMode,
-                    onCheckedChange = { settings.oledMode = it }
-                )
-                Divider(cs.outlineVariant)
-                SettingsRowToggle(
-                    icon = Icons.Default.Swipe,
-                    iconBg = cs.tertiaryContainer,
-                    iconFg = cs.onTertiaryContainer,
-                    title = "Block edge swipes",
-                    sub = "Side swipes and Back do not leave the play screen; use the … menu",
-                    checked = settings.blockEdgeGestures,
-                    onCheckedChange = { settings.blockEdgeGestures = it }
-                )
-                Divider(cs.outlineVariant)
-                SettingsRowToggle(
-                    icon = Icons.Default.PushPin,
-                    iconBg = cs.primaryContainer,
-                    iconFg = cs.onPrimaryContainer,
-                    title = "Pin screen while playing",
-                    sub = "Blocks Home and Recents with Android app pinning",
-                    checked = settings.pinScreen,
-                    onCheckedChange = { settings.pinScreen = it }
-                )
-            }
+            PlayScreenSection(settings)
 
-            SettingsSection("MOTION") {
-                SettingsRowToggle(
-                    icon = Icons.Default.Sensors,
-                    iconBg = cs.tertiaryContainer,
-                    iconFg = cs.onTertiaryContainer,
-                    title = "Motion controls",
-                    sub = "Gyroscope maps to right stick",
-                    checked = settings.motionEnabled,
-                    onCheckedChange = { settings.motionEnabled = it }
-                )
-                if (settings.motionEnabled) {
-                    Divider(cs.outlineVariant)
-                    MotionModeRow(
-                        mode = settings.motionMode,
-                        onChange = { settings.motionMode = it }
-                    )
-                    Divider(cs.outlineVariant)
-                    MotionSensitivityRow(
-                        mode = settings.motionMode,
-                        sensitivity = settings.motionSensitivity,
-                        onChange = { settings.motionSensitivity = it }
-                    )
-                    Divider(cs.outlineVariant)
-                    SettingsRowToggle(
-                        icon = Icons.Default.SwapHoriz,
-                        iconBg = cs.tertiaryContainer,
-                        iconFg = cs.onTertiaryContainer,
-                        title = "Invert X",
-                        sub = "Flip horizontal motion",
-                        checked = settings.motionInvertX,
-                        onCheckedChange = { settings.motionInvertX = it }
-                    )
-                    // Vertical inversion is meaningless for steering, which only drives the X axis.
-                    if (settings.motionMode == MotionMode.AIM) {
-                        Divider(cs.outlineVariant)
-                        SettingsRowToggle(
-                            icon = Icons.Default.SwapVert,
-                            iconBg = cs.tertiaryContainer,
-                            iconFg = cs.onTertiaryContainer,
-                            title = "Invert Y",
-                            sub = "Flip vertical motion",
-                            checked = settings.motionInvertY,
-                            onCheckedChange = { settings.motionInvertY = it }
-                        )
-                    }
-                }
-            }
+            MotionSection(settings)
 
-            SettingsSection("CONNECTION") {
-                SettingsRowInfo(
-                    icon = Icons.Default.Phonelink,
-                    iconBg = cs.primaryContainer,
-                    iconFg = cs.onPrimaryContainer,
-                    title = "HID profile",
-                    sub = "Gamepad over Bluetooth",
-                    trailingText = "Active",
-                    trailingColor = cs.primary
-                )
-            }
+            ConnectionSection()
 
-            SettingsSection("ABOUT", bottomGap = 16.dp) {
-                SettingsRowInfo(
-                    icon = Icons.AutoMirrored.Filled.HelpOutline,
-                    iconBg = cs.surfaceContainerHigh,
-                    iconFg = cs.onSurface,
-                    title = "Help & feedback",
-                    sub = "Docs, diagnostics, report an issue"
-                )
-                Divider(cs.outlineVariant)
-                SettingsRowInfo(
-                    icon = Icons.Default.Info,
-                    iconBg = cs.surfaceContainerHigh,
-                    iconFg = cs.onSurface,
-                    title = "Version",
-                    sub = null,
-                    trailingText = appVersion,
-                    trailingColor = cs.onSurfaceVariant
+            AboutSection(appVersion)
+        }
+    }
+}
+
+@Composable
+private fun SettingsTitle() {
+    val cs = MaterialTheme.colorScheme
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "Settings",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.3).sp,
+            color = cs.onSurface
+        )
+    }
+}
+
+@Composable
+private fun AppearanceSection(settings: AppSettings) {
+    val cs = MaterialTheme.colorScheme
+
+    SettingsSection("APPEARANCE", innerPadding = 14.dp) {
+        Text(
+            "Theme",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = cs.onSurface,
+            modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            themeOptions.forEach { (theme, label, icon) ->
+                ThemeButton(
+                    modifier = Modifier.weight(1f),
+                    label = label,
+                    icon = icon,
+                    selected = settings.appTheme == theme,
+                    cs = cs,
+                    onClick = { settings.appTheme = theme }
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun GameplaySection(settings: AppSettings, onWindowsModeChange: (Boolean) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+
+    SettingsSection("GAMEPLAY") {
+        SettingsRowToggle(
+            icon = Icons.Default.Games,
+            iconBg = cs.secondaryContainer,
+            iconFg = cs.onSecondaryContainer,
+            title = "Windows DInput mode",
+            sub = "Legacy controller compatibility",
+            checked = settings.isWindowsMode,
+            onCheckedChange = onWindowsModeChange
+        )
+        Divider(cs.outlineVariant)
+        HapticIntensityRow(
+            intensity = settings.hapticIntensity,
+            onChange = { settings.hapticIntensity = it }
+        )
+        Divider(cs.outlineVariant)
+        SettingsRowToggle(
+            icon = Icons.Default.Bluetooth,
+            iconBg = cs.primaryContainer,
+            iconFg = cs.onPrimaryContainer,
+            title = "Auto-reconnect",
+            sub = "Resume last device on launch",
+            checked = settings.autoReconnect,
+            onCheckedChange = { settings.autoReconnect = it }
+        )
+    }
+}
+
+@Composable
+private fun PlayScreenSection(settings: AppSettings) {
+    val cs = MaterialTheme.colorScheme
+
+    SettingsSection("PLAY SCREEN") {
+        SettingsRowToggle(
+            icon = Icons.Default.DarkMode,
+            iconBg = cs.secondaryContainer,
+            iconFg = cs.onSecondaryContainer,
+            title = "OLED mode",
+            sub = "Black background with dim outline controls",
+            checked = settings.oledMode,
+            onCheckedChange = { settings.oledMode = it }
+        )
+        Divider(cs.outlineVariant)
+        SettingsRowToggle(
+            icon = Icons.Default.Swipe,
+            iconBg = cs.tertiaryContainer,
+            iconFg = cs.onTertiaryContainer,
+            title = "Block edge swipes",
+            sub = "Side swipes and Back do not leave the play screen; use the … menu",
+            checked = settings.blockEdgeGestures,
+            onCheckedChange = { settings.blockEdgeGestures = it }
+        )
+        Divider(cs.outlineVariant)
+        SettingsRowToggle(
+            icon = Icons.Default.PushPin,
+            iconBg = cs.primaryContainer,
+            iconFg = cs.onPrimaryContainer,
+            title = "Pin screen while playing",
+            sub = "Blocks Home and Recents with Android app pinning",
+            checked = settings.pinScreen,
+            onCheckedChange = { settings.pinScreen = it }
+        )
+    }
+}
+
+@Composable
+private fun MotionSection(settings: AppSettings) {
+    val cs = MaterialTheme.colorScheme
+
+    SettingsSection("MOTION") {
+        SettingsRowToggle(
+            icon = Icons.Default.Sensors,
+            iconBg = cs.tertiaryContainer,
+            iconFg = cs.onTertiaryContainer,
+            title = "Motion controls",
+            sub = "Gyroscope maps to right stick",
+            checked = settings.motionEnabled,
+            onCheckedChange = { settings.motionEnabled = it }
+        )
+        if (settings.motionEnabled) {
+            Divider(cs.outlineVariant)
+            MotionModeRow(
+                mode = settings.motionMode,
+                onChange = { settings.motionMode = it }
+            )
+            Divider(cs.outlineVariant)
+            MotionSensitivityRow(
+                mode = settings.motionMode,
+                sensitivity = settings.motionSensitivity,
+                onChange = { settings.motionSensitivity = it }
+            )
+            Divider(cs.outlineVariant)
+            SettingsRowToggle(
+                icon = Icons.Default.SwapHoriz,
+                iconBg = cs.tertiaryContainer,
+                iconFg = cs.onTertiaryContainer,
+                title = "Invert X",
+                sub = "Flip horizontal motion",
+                checked = settings.motionInvertX,
+                onCheckedChange = { settings.motionInvertX = it }
+            )
+            // Vertical inversion is meaningless for steering, which only drives the X axis.
+            if (settings.motionMode == MotionMode.AIM) {
+                Divider(cs.outlineVariant)
+                SettingsRowToggle(
+                    icon = Icons.Default.SwapVert,
+                    iconBg = cs.tertiaryContainer,
+                    iconFg = cs.onTertiaryContainer,
+                    title = "Invert Y",
+                    sub = "Flip vertical motion",
+                    checked = settings.motionInvertY,
+                    onCheckedChange = { settings.motionInvertY = it }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectionSection() {
+    val cs = MaterialTheme.colorScheme
+
+    SettingsSection("CONNECTION") {
+        SettingsRowInfo(
+            icon = Icons.Default.Phonelink,
+            iconBg = cs.primaryContainer,
+            iconFg = cs.onPrimaryContainer,
+            title = "HID profile",
+            sub = "Gamepad over Bluetooth",
+            trailingText = "Active",
+            trailingColor = cs.primary
+        )
+    }
+}
+
+@Composable
+private fun AboutSection(appVersion: String) {
+    val cs = MaterialTheme.colorScheme
+
+    SettingsSection("ABOUT", bottomGap = 16.dp) {
+        SettingsRowInfo(
+            icon = Icons.AutoMirrored.Filled.HelpOutline,
+            iconBg = cs.surfaceContainerHigh,
+            iconFg = cs.onSurface,
+            title = "Help & feedback",
+            sub = "Docs, diagnostics, report an issue"
+        )
+        Divider(cs.outlineVariant)
+        SettingsRowInfo(
+            icon = Icons.Default.Info,
+            iconBg = cs.surfaceContainerHigh,
+            iconFg = cs.onSurface,
+            title = "Version",
+            sub = null,
+            trailingText = appVersion,
+            trailingColor = cs.onSurfaceVariant
+        )
     }
 }
 
