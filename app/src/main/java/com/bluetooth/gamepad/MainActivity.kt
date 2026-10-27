@@ -12,7 +12,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.SharedPreferences
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Build
@@ -54,12 +53,10 @@ import com.bluetooth.gamepad.layout.EditorSession
 import com.bluetooth.gamepad.layout.LayoutEditorScreen
 import com.bluetooth.gamepad.layout.LayoutRepository
 import com.bluetooth.gamepad.layout.LayoutsScreen
-import com.bluetooth.gamepad.motion.MotionMode
 import com.bluetooth.gamepad.play.ControllerScreen
+import com.bluetooth.gamepad.settings.AppSettings
 import com.bluetooth.gamepad.settings.SettingsScreen
-import com.bluetooth.gamepad.ui.theme.AppTheme
 import com.bluetooth.gamepad.ui.theme.BtGamepadTheme
-import com.bluetooth.gamepad.util.HapticIntensity
 import java.lang.reflect.Method
 
 enum class NavTab { CONNECT, LAYOUTS, SETTINGS }
@@ -72,17 +69,7 @@ class MainActivity : ComponentActivity() {
     private val hidConnectionState = mutableStateOf(BluetoothProfile.STATE_DISCONNECTED)
     private val connectedDeviceName = mutableStateOf("")
     private val ownDeviceName = mutableStateOf("")
-    private val isWindowsMode = mutableStateOf(false)
-    private val appTheme = mutableStateOf(AppTheme.SYSTEM)
-    private val hapticIntensity = mutableStateOf(HapticIntensity.MEDIUM)
-    private val motionEnabled = mutableStateOf(false)
-    private val motionMode = mutableStateOf(MotionMode.AIM)
-    // Gyro sensitivity: degrees/second of rotation for full stick deflection (lower = faster).
-    private val motionSensitivity = mutableStateOf(90f)
-    private val motionInvertX = mutableStateOf(false)
-    private val motionInvertY = mutableStateOf(false)
     private val currentTab = mutableStateOf(NavTab.CONNECT)
-    private val activeLayoutId = mutableStateOf(ControllerLayout.DEFAULT_ID)
     private val editingLayout = mutableStateOf<ControllerLayout?>(null)
     // Working state for the active edit session (buttons, undo/redo, selection, dirty flag). Held
     // here so it survives the editor leaving composition during Test; discarded only on editor exit.
@@ -91,16 +78,11 @@ class MainActivity : ComponentActivity() {
     // so previewing unsaved edits does not overwrite the stored layout.
     private val previewLayout = mutableStateOf<ControllerLayout?>(null)
     private val layoutsRefreshKey = mutableStateOf(0)
-    private val autoReconnect = mutableStateOf(true)
-    private val showAllDevices = mutableStateOf(false)
-    private val oledMode = mutableStateOf(false)
-    private val blockEdgeGestures = mutableStateOf(true)
-    private val pinScreen = mutableStateOf(false)
 
     private var gamepad: BluetoothHidGamepad? = null
     private var userCancelledConnect = false
-    lateinit var prefs: SharedPreferences
-    lateinit var layoutRepo: LayoutRepository
+    private lateinit var settings: AppSettings
+    private lateinit var layoutRepo: LayoutRepository
 
     private val enableBluetoothLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -186,33 +168,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        prefs = getSharedPreferences("data", MODE_PRIVATE)
+        val prefs = getSharedPreferences("data", MODE_PRIVATE)
+        settings = AppSettings(prefs)
         layoutRepo = LayoutRepository(prefs)
-        isWindowsMode.value = prefs.getBoolean("isWindowsDInputMode", false)
-        activeLayoutId.value = prefs.getString("activeLayoutId", ControllerLayout.DEFAULT_ID) ?: ControllerLayout.DEFAULT_ID
-        appTheme.value = when (prefs.getString("appTheme", "SYSTEM")) {
-            "LIGHT"  -> AppTheme.LIGHT
-            "DARK"   -> AppTheme.DARK
-            "AMOLED" -> AppTheme.AMOLED
-            else     -> AppTheme.SYSTEM
-        }
-        hapticIntensity.value = when (prefs.getString("hapticIntensity", "MEDIUM")) {
-            "OFF"    -> HapticIntensity.OFF
-            "LIGHT"  -> HapticIntensity.LIGHT
-            "STRONG" -> HapticIntensity.STRONG
-            else     -> HapticIntensity.MEDIUM
-        }
-        motionEnabled.value = prefs.getBoolean("motionEnabled", false)
-        motionMode.value = if (prefs.getString("motionMode", "AIM") == "STEERING")
-            MotionMode.STEERING else MotionMode.AIM
-        motionSensitivity.value = prefs.getFloat("motionSensDps", 90f)
-        motionInvertX.value = prefs.getBoolean("motionInvertX", false)
-        motionInvertY.value = prefs.getBoolean("motionInvertY", false)
-        autoReconnect.value = prefs.getBoolean("autoReconnect", true)
-        showAllDevices.value = prefs.getBoolean("showAllDevices", false)
-        oledMode.value = prefs.getBoolean("oledMode", false)
-        blockEdgeGestures.value = prefs.getBoolean("blockEdgeGestures", true)
-        pinScreen.value = prefs.getBoolean("pinScreen", false)
 
         // Bond state changes are sent by the Bluetooth system — must be EXPORTED
         androidx.core.content.ContextCompat.registerReceiver(
@@ -230,9 +188,9 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            BtGamepadTheme(appTheme = appTheme.value) {
+            BtGamepadTheme(appTheme = settings.appTheme) {
                 val isFullScreen = controllerVisible.value || editingLayout.value != null
-                androidx.compose.runtime.LaunchedEffect(isFullScreen, controllerVisible.value, pinScreen.value) {
+                androidx.compose.runtime.LaunchedEffect(isFullScreen, controllerVisible.value, settings.pinScreen) {
                     requestedOrientation = if (isFullScreen)
                         ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                     else
@@ -250,7 +208,7 @@ class MainActivity : ComponentActivity() {
                     else
                         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     val pinned = getSystemService(ActivityManager::class.java).lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
-                    val wantPinned = controllerVisible.value && pinScreen.value
+                    val wantPinned = controllerVisible.value && settings.pinScreen
                     try {
                         if (wantPinned && !pinned) startLockTask()
                         if (!wantPinned && pinned) stopLockTask()
@@ -263,13 +221,13 @@ class MainActivity : ComponentActivity() {
                         previewLayout.value = null
                     }
                     // Some phones deliver an edge swipe as Back despite exclusion, so Back is ignored while blocking.
-                    BackHandler { if (!blockEdgeGestures.value) closeController() }
-                    val playLayouts = androidx.compose.runtime.remember(layoutsRefreshKey.value, activeLayoutId.value) {
+                    BackHandler { if (!settings.blockEdgeGestures) closeController() }
+                    val playLayouts = androidx.compose.runtime.remember(layoutsRefreshKey.value, settings.activeLayoutId) {
                         layoutRepo.getAll()
                     }
                     ControllerScreen(
                         gamepad = gamepad,
-                        isWindowsMode = isWindowsMode.value,
+                        isWindowsMode = settings.isWindowsMode,
                         connectedDeviceName = connectedDeviceName.value,
                         connectionState = hidConnectionState.value,
                         bluetoothOn = bluetoothOn.value,
@@ -278,22 +236,19 @@ class MainActivity : ComponentActivity() {
                         onReconnect = { connectLastDevice() },
                         onEnableBluetooth = { requestEnableBluetooth() },
                         layout = previewLayout.value
-                            ?: layoutRepo.load(activeLayoutId.value)
+                            ?: layoutRepo.load(settings.activeLayoutId)
                             ?: ControllerLayout.default(),
                         // A Test preview shows unsaved edits, so switching layouts is not offered there.
                         layouts = if (previewLayout.value == null) playLayouts else emptyList(),
-                        onLayoutSelect = { id ->
-                            activeLayoutId.value = id
-                            prefs.edit().putString("activeLayoutId", id).apply()
-                        },
-                        hapticIntensity = hapticIntensity.value,
-                        motionEnabled = motionEnabled.value,
-                        motionMode = motionMode.value,
-                        motionSensitivity = motionSensitivity.value,
-                        motionInvertX = motionInvertX.value,
-                        motionInvertY = motionInvertY.value,
-                        oledMode = oledMode.value,
-                        blockEdgeGestures = blockEdgeGestures.value,
+                        onLayoutSelect = { id -> settings.activeLayoutId = id },
+                        hapticIntensity = settings.hapticIntensity,
+                        motionEnabled = settings.motionEnabled,
+                        motionMode = settings.motionMode,
+                        motionSensitivity = settings.motionSensitivity,
+                        motionInvertX = settings.motionInvertX,
+                        motionInvertY = settings.motionInvertY,
+                        oledMode = settings.oledMode,
+                        blockEdgeGestures = settings.blockEdgeGestures,
                         onStopClick = closeController
                     )
                 } else if (editingLayout.value != null && editorSession.value != null) {
@@ -364,12 +319,9 @@ class MainActivity : ComponentActivity() {
                                         onUnpairDevice = { device -> unpairDevice(device) },
                                         connectedDeviceAddress = gamepad?.connectedDevice?.address ?: "",
                                         connectedDevice = gamepad?.connectedDevice,
-                                        lastDeviceAddress = prefs.getString("lastDeviceAddress", null) ?: "",
-                                        showAllDevices = showAllDevices.value,
-                                        onShowAllDevicesChange = { value ->
-                                            showAllDevices.value = value
-                                            prefs.edit().putBoolean("showAllDevices", value).apply()
-                                        },
+                                        lastDeviceAddress = settings.lastDeviceAddress ?: "",
+                                        showAllDevices = settings.showAllDevices,
+                                        onShowAllDevicesChange = { settings.showAllDevices = it },
                                         activeDInputMode = gamepad?.isWindowsDInputMode ?: false,
                                         onConnectDevice = { device -> connectTo(device) },
                                         onCancelConnect = { device ->
@@ -387,8 +339,7 @@ class MainActivity : ComponentActivity() {
                                             repo = layoutRepo,
                                             connectedDeviceName = connectedDeviceName.value,
                                             onStart = { layout ->
-                                                activeLayoutId.value = layout.id
-                                                prefs.edit().putString("activeLayoutId", layout.id).apply()
+                                                settings.activeLayoutId = layout.id
                                                 previewLayout.value = null
                                                 controllerVisible.value = true
                                             },
@@ -401,67 +352,11 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                     NavTab.SETTINGS -> SettingsScreen(
-                                        appTheme = appTheme.value,
+                                        settings = settings,
                                         appVersion = packageManager.getPackageInfo(packageName, 0).versionName ?: "",
-                                        isWindowsMode = isWindowsMode.value,
-                                        hapticIntensity = hapticIntensity.value,
-                                        motionEnabled = motionEnabled.value,
-                                        motionMode = motionMode.value,
-                                        motionSensitivity = motionSensitivity.value,
-                                                    motionInvertX = motionInvertX.value,
-                                        motionInvertY = motionInvertY.value,
-                                        autoReconnect = autoReconnect.value,
-                                        oledMode = oledMode.value,
-                                        blockEdgeGestures = blockEdgeGestures.value,
-                                        pinScreen = pinScreen.value,
-                                        onThemeChange = { theme ->
-                                            appTheme.value = theme
-                                            prefs.edit().putString("appTheme", theme.name).apply()
-                                        },
-                                        onWindowsModeToggle = { value ->
-                                            isWindowsMode.value = value
-                                            prefs.edit().putBoolean("isWindowsDInputMode", value).apply()
+                                        onWindowsModeChange = { value ->
+                                            settings.isWindowsMode = value
                                             gamepad?.switchMode(value)
-                                        },
-                                        onHapticIntensityChange = { value ->
-                                            hapticIntensity.value = value
-                                            prefs.edit().putString("hapticIntensity", value.name).apply()
-                                        },
-                                        onMotionEnabledChange = { value ->
-                                            motionEnabled.value = value
-                                            prefs.edit().putBoolean("motionEnabled", value).apply()
-                                        },
-                                        onMotionModeChange = { value ->
-                                            motionMode.value = value
-                                            prefs.edit().putString("motionMode", value.name).apply()
-                                        },
-                                        onMotionSensitivityChange = { value ->
-                                            motionSensitivity.value = value
-                                            prefs.edit().putFloat("motionSensDps", value).apply()
-                                        },
-                                        onMotionInvertXChange = { value ->
-                                            motionInvertX.value = value
-                                            prefs.edit().putBoolean("motionInvertX", value).apply()
-                                        },
-                                        onMotionInvertYChange = { value ->
-                                            motionInvertY.value = value
-                                            prefs.edit().putBoolean("motionInvertY", value).apply()
-                                        },
-                                        onAutoReconnectChange = { value ->
-                                            autoReconnect.value = value
-                                            prefs.edit().putBoolean("autoReconnect", value).apply()
-                                        },
-                                        onOledModeChange = { value ->
-                                            oledMode.value = value
-                                            prefs.edit().putBoolean("oledMode", value).apply()
-                                        },
-                                        onBlockEdgeGesturesChange = { value ->
-                                            blockEdgeGestures.value = value
-                                            prefs.edit().putBoolean("blockEdgeGestures", value).apply()
-                                        },
-                                        onPinScreenChange = { value ->
-                                            pinScreen.value = value
-                                            prefs.edit().putBoolean("pinScreen", value).apply()
                                         },
                                         contentPadding = innerPadding
                                     )
@@ -551,12 +446,11 @@ class MainActivity : ComponentActivity() {
     // A denial without rationale means "don't ask again" only if it was denied before;
     // a first dialog dismissed by tapping outside looks the same.
     private fun isPermanentlyDenied(permission: String): Boolean {
-        val key = "denied_$permission"
         if (shouldShowRequestPermissionRationale(permission)) {
-            prefs.edit().putBoolean(key, true).apply()
+            settings.markPermissionDenied(permission)
             return false
         }
-        return prefs.getBoolean(key, false)
+        return settings.wasPermissionDenied(permission)
     }
 
     private fun openAppSettings() {
@@ -584,7 +478,7 @@ class MainActivity : ComponentActivity() {
         if (gamepad !== BluetoothHidGamepad.current) gamepad = null
         if (gamepad == null) {
             gamepad = BluetoothHidGamepad(this).also { gp ->
-                gp.isWindowsDInputMode = isWindowsMode.value
+                gp.isWindowsDInputMode = settings.isWindowsMode
                 gp.onStatusChanged = {
                     runOnUiThread {
                         val prevState = hidConnectionState.value
@@ -612,7 +506,7 @@ class MainActivity : ComponentActivity() {
 
                         when (gp.connectionState) {
                             BluetoothProfile.STATE_CONNECTED -> {
-                                prefs.edit().putString("lastDeviceAddress", gp.connectedDevice?.address).apply()
+                                settings.lastDeviceAddress = gp.connectedDevice?.address
                                 connectFailedName.value = ""
                                 Toast.makeText(this, "Connected to ${gp.connectedDeviceName}", Toast.LENGTH_SHORT).show()
                             }
@@ -632,7 +526,7 @@ class MainActivity : ComponentActivity() {
                 }
                 gp.start()
             }
-            if (prefs.getBoolean("autoReconnect", true)) {
+            if (settings.autoReconnect) {
                 reconnectLastDevice()
             }
         }
@@ -684,7 +578,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun reconnectLastDevice(): Boolean {
-        val address = prefs.getString("lastDeviceAddress", null) ?: return false
+        val address = settings.lastDeviceAddress ?: return false
         if (gamepad == null) return false
         return try {
             val manager = getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager

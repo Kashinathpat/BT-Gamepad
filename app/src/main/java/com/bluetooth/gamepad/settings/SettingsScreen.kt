@@ -58,31 +58,9 @@ import com.bluetooth.gamepad.util.obtainVibrator
 
 @Composable
 fun SettingsScreen(
-    appTheme: AppTheme,
+    settings: AppSettings,
     appVersion: String,
-    isWindowsMode: Boolean,
-    hapticIntensity: HapticIntensity,
-    motionEnabled: Boolean,
-    motionMode: MotionMode,
-    motionSensitivity: Float,
-    motionInvertX: Boolean,
-    motionInvertY: Boolean,
-    autoReconnect: Boolean,
-    oledMode: Boolean,
-    blockEdgeGestures: Boolean,
-    pinScreen: Boolean,
-    onThemeChange: (AppTheme) -> Unit,
-    onWindowsModeToggle: (Boolean) -> Unit,
-    onHapticIntensityChange: (HapticIntensity) -> Unit,
-    onMotionEnabledChange: (Boolean) -> Unit,
-    onMotionModeChange: (MotionMode) -> Unit,
-    onMotionSensitivityChange: (Float) -> Unit,
-    onMotionInvertXChange: (Boolean) -> Unit,
-    onMotionInvertYChange: (Boolean) -> Unit,
-    onAutoReconnectChange: (Boolean) -> Unit,
-    onOledModeChange: (Boolean) -> Unit,
-    onBlockEdgeGesturesChange: (Boolean) -> Unit,
-    onPinScreenChange: (Boolean) -> Unit,
+    onWindowsModeChange: (Boolean) -> Unit,
     contentPadding: PaddingValues = PaddingValues()
 ) {
     val cs = MaterialTheme.colorScheme
@@ -137,33 +115,33 @@ fun SettingsScreen(
                         modifier = Modifier.weight(1f),
                         label = "Light",
                         icon = Icons.Default.LightMode,
-                        selected = appTheme == AppTheme.LIGHT,
+                        selected = settings.appTheme == AppTheme.LIGHT,
                         cs = cs,
-                        onClick = { onThemeChange(AppTheme.LIGHT) }
+                        onClick = { settings.appTheme = AppTheme.LIGHT }
                     )
                     ThemeButton(
                         modifier = Modifier.weight(1f),
                         label = "Dark",
                         icon = Icons.Default.DarkMode,
-                        selected = appTheme == AppTheme.DARK,
+                        selected = settings.appTheme == AppTheme.DARK,
                         cs = cs,
-                        onClick = { onThemeChange(AppTheme.DARK) }
+                        onClick = { settings.appTheme = AppTheme.DARK }
                     )
                     ThemeButton(
                         modifier = Modifier.weight(1f),
                         label = "AMOLED",
                         icon = Icons.Default.SmartDisplay,
-                        selected = appTheme == AppTheme.AMOLED,
+                        selected = settings.appTheme == AppTheme.AMOLED,
                         cs = cs,
-                        onClick = { onThemeChange(AppTheme.AMOLED) }
+                        onClick = { settings.appTheme = AppTheme.AMOLED }
                     )
                     ThemeButton(
                         modifier = Modifier.weight(1f),
                         label = "System",
                         icon = Icons.Default.SettingsBrightness,
-                        selected = appTheme == AppTheme.SYSTEM,
+                        selected = settings.appTheme == AppTheme.SYSTEM,
                         cs = cs,
-                        onClick = { onThemeChange(AppTheme.SYSTEM) }
+                        onClick = { settings.appTheme = AppTheme.SYSTEM }
                     )
                 }
             }
@@ -186,13 +164,13 @@ fun SettingsScreen(
                     iconFg = cs.onSecondaryContainer,
                     title = "Windows DInput mode",
                     sub = "Legacy controller compatibility",
-                    checked = isWindowsMode,
-                    onCheckedChange = onWindowsModeToggle
+                    checked = settings.isWindowsMode,
+                    onCheckedChange = onWindowsModeChange
                 )
                 Divider(cs.outlineVariant)
                 HapticIntensityRow(
-                    intensity = hapticIntensity,
-                    onChange = onHapticIntensityChange
+                    intensity = settings.hapticIntensity,
+                    onChange = { settings.hapticIntensity = it }
                 )
                 Divider(cs.outlineVariant)
                 SettingsRowToggle(
@@ -201,8 +179,8 @@ fun SettingsScreen(
                     iconFg = cs.onPrimaryContainer,
                     title = "Auto-reconnect",
                     sub = "Resume last device on launch",
-                    checked = autoReconnect,
-                    onCheckedChange = onAutoReconnectChange
+                    checked = settings.autoReconnect,
+                    onCheckedChange = { settings.autoReconnect = it }
                 )
             }
 
@@ -223,8 +201,8 @@ fun SettingsScreen(
                     iconFg = cs.onSecondaryContainer,
                     title = "OLED mode",
                     sub = "Black background with dim outline controls",
-                    checked = oledMode,
-                    onCheckedChange = onOledModeChange
+                    checked = settings.oledMode,
+                    onCheckedChange = { settings.oledMode = it }
                 )
                 Divider(cs.outlineVariant)
                 SettingsRowToggle(
@@ -233,8 +211,8 @@ fun SettingsScreen(
                     iconFg = cs.onTertiaryContainer,
                     title = "Block edge swipes",
                     sub = "Side swipes and Back do not leave the play screen; use the … menu",
-                    checked = blockEdgeGestures,
-                    onCheckedChange = onBlockEdgeGesturesChange
+                    checked = settings.blockEdgeGestures,
+                    onCheckedChange = { settings.blockEdgeGestures = it }
                 )
                 Divider(cs.outlineVariant)
                 SettingsRowToggle(
@@ -243,8 +221,8 @@ fun SettingsScreen(
                     iconFg = cs.onPrimaryContainer,
                     title = "Pin screen while playing",
                     sub = "Blocks Home and Recents with Android app pinning",
-                    checked = pinScreen,
-                    onCheckedChange = onPinScreenChange
+                    checked = settings.pinScreen,
+                    onCheckedChange = { settings.pinScreen = it }
                 )
             }
 
@@ -266,20 +244,20 @@ fun SettingsScreen(
                     iconFg = cs.onTertiaryContainer,
                     title = "Motion controls",
                     sub = "Gyroscope maps to right stick",
-                    checked = motionEnabled,
-                    onCheckedChange = onMotionEnabledChange
+                    checked = settings.motionEnabled,
+                    onCheckedChange = { settings.motionEnabled = it }
                 )
-                if (motionEnabled) {
+                if (settings.motionEnabled) {
                     Divider(cs.outlineVariant)
                     MotionModeRow(
-                        mode = motionMode,
-                        onChange = onMotionModeChange
+                        mode = settings.motionMode,
+                        onChange = { settings.motionMode = it }
                     )
                     Divider(cs.outlineVariant)
                     MotionSensitivityRow(
-                        mode = motionMode,
-                        sensitivity = motionSensitivity,
-                        onChange = onMotionSensitivityChange
+                        mode = settings.motionMode,
+                        sensitivity = settings.motionSensitivity,
+                        onChange = { settings.motionSensitivity = it }
                     )
                     Divider(cs.outlineVariant)
                     SettingsRowToggle(
@@ -288,11 +266,11 @@ fun SettingsScreen(
                         iconFg = cs.onTertiaryContainer,
                         title = "Invert X",
                         sub = "Flip horizontal motion",
-                        checked = motionInvertX,
-                        onCheckedChange = onMotionInvertXChange
+                        checked = settings.motionInvertX,
+                        onCheckedChange = { settings.motionInvertX = it }
                     )
                     // Vertical inversion is meaningless for steering, which only drives the X axis.
-                    if (motionMode == MotionMode.AIM) {
+                    if (settings.motionMode == MotionMode.AIM) {
                         Divider(cs.outlineVariant)
                         SettingsRowToggle(
                             icon = Icons.Default.SwapVert,
@@ -300,8 +278,8 @@ fun SettingsScreen(
                             iconFg = cs.onTertiaryContainer,
                             title = "Invert Y",
                             sub = "Flip vertical motion",
-                            checked = motionInvertY,
-                            onCheckedChange = onMotionInvertYChange
+                            checked = settings.motionInvertY,
+                            onCheckedChange = { settings.motionInvertY = it }
                         )
                     }
                 }
