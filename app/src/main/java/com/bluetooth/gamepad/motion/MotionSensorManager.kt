@@ -16,6 +16,16 @@ import kotlin.math.abs
 // AIM maps the current rotation speed to the stick; STEERING maps tilt to the X axis.
 enum class MotionMode { AIM, STEERING }
 
+// Rotates a sensor x/y pair into the aim frame (x = pitch axis to the right, y = up the screen) for the
+// display rotation, so flipping the phone end-for-end does not invert aiming. Gyro and accelerometer
+// must share it or the yaw/pitch split breaks.
+internal fun rotateToAimFrame(rotation: Int, x: Float, y: Float): Pair<Float, Float> = when (rotation) {
+    Surface.ROTATION_90 -> -y to x
+    Surface.ROTATION_270 -> y to -x
+    Surface.ROTATION_180 -> -x to -y
+    else -> x to y
+}
+
 class MotionSensorManager(private val context: Context) {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -86,16 +96,8 @@ class MotionSensorManager(private val context: Context) {
         }
     }
 
-    // Must use the same rotation table as aimValues, or the yaw/pitch split breaks.
     private fun handleAccel(event: SensorEvent) {
-        val dx = event.values[0]
-        val dy = event.values[1]
-        val (ax, ay) = when (displayRotation()) {
-            Surface.ROTATION_90 -> -dy to dx
-            Surface.ROTATION_270 -> dy to -dx
-            Surface.ROTATION_180 -> -dx to -dy
-            else -> dx to dy
-        }
+        val (ax, ay) = rotateToAimFrame(displayRotation(), event.values[0], event.values[1])
         accelAimX = ax
         accelAimY = ay
         accelAimZ = event.values[2]
@@ -132,16 +134,7 @@ class MotionSensorManager(private val context: Context) {
         if (dt <= 0f) return null
         if (dt > 0.05f) dt = 0.05f
 
-        // Rotate gyro axes into the aim frame (x = pitch axis to the right, y = up the screen), so
-        // flipping the phone end-for-end does not invert aiming.
-        val dx = event.values[0]
-        val dy = event.values[1]
-        val (gx, gy) = when (displayRotation()) {
-            Surface.ROTATION_90 -> -dy to dx
-            Surface.ROTATION_270 -> dy to -dx
-            Surface.ROTATION_180 -> -dx to -dy
-            else -> dx to dy
-        }
+        val (gx, gy) = rotateToAimFrame(displayRotation(), event.values[0], event.values[1])
         val gz = event.values[2]
 
         val maxRad = (degPerSecForMax * PI / 180.0).toFloat()
