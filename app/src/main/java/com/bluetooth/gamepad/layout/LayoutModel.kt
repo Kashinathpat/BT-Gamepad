@@ -6,6 +6,7 @@ import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import kotlin.math.roundToInt
 
 enum class ControlShape(val title: String) { CIRCLE("Circle"), ROUNDED("Rounded"), PILL("Pill"), OUTLINE("Outline") }
 
@@ -15,6 +16,11 @@ val TURBO_RATES = listOf(5, 10, 20)
 const val MIN_OPACITY = 0.2f
 const val MAX_LABEL_LENGTH = 10
 const val MAX_CONTROLS = 64
+const val MIN_CONTROL_SIZE = 0.04f
+const val MAX_CONTROL_SIZE = 0.6f
+const val MIN_POSITION = 0.02f
+const val MAX_POSITION = 0.98f
+const val MAX_UNDO_STEPS = 50
 
 data class ButtonConfig(
     val id: String,
@@ -48,17 +54,142 @@ val ButtonConfig.baseId: String
 
 fun String.baseButtonId(): String = substringBefore('_')
 
-/**
- * Mutable working state for one layout-editing session. Held by the host (MainActivity) so it
- * survives the editor leaving composition during a Test preview, and is discarded only when the
- * user leaves the editor entirely. Uses Compose snapshot state so the editor observes changes.
- */
+// Working state and edit rules for one layout-editing session. Held by the host so it survives the
+// editor leaving composition during a Test preview, and discarded only when the editor is left.
 class EditorSession(layout: ControllerLayout) {
     val buttons = mutableStateListOf<ButtonConfig>().also { it.addAll(layout.buttons) }
     val undoStack = mutableStateListOf<List<ButtonConfig>>()
     val redoStack = mutableStateListOf<List<ButtonConfig>>()
     val selectedId = mutableStateOf<String?>(null)
     val edited = mutableStateOf(false)
+    // Button whose label is being typed; consecutive keystrokes on it share one undo step.
+    private var labelEditId: String? = null
+
+    fun select(id: String?) {
+        selectedId.value = id
+        labelEditId = null
+    }
+
+    fun endLabelEdit() {
+        labelEditId = null
+    }
+
+    fun pushUndo() {
+        labelEditId = null
+        if (undoStack.size >= MAX_UNDO_STEPS) undoStack.removeAt(0)
+        undoStack.add(buttons.toList())
+        redoStack.clear()
+        edited.value = true
+    }
+
+    fun undo() {
+        if (undoStack.isEmpty()) return
+        labelEditId = null
+        redoStack.add(buttons.toList())
+        val prev = undoStack.removeAt(undoStack.lastIndex)
+        buttons.clear()
+        buttons.addAll(prev)
+    }
+
+    fun redo() {
+        if (redoStack.isEmpty()) return
+        labelEditId = null
+        if (undoStack.size >= MAX_UNDO_STEPS) undoStack.removeAt(0)
+        undoStack.add(buttons.toList())
+        val next = redoStack.removeAt(redoStack.lastIndex)
+        buttons.clear()
+        buttons.addAll(next)
+    }
+
+    fun addElement(template: ButtonConfig) {
+        pushUndo()
+        // The bare template id for the first instance, then "<id>_N" for duplicates. Probing for the
+        // next free suffix means deleting an earlier duplicate can never produce a colliding id.
+        val existingIds = buttons.mapTo(HashSet()) { it.id }
+        val newId = if (template.id !in existingIds) {
+            template.id
+        } else {
+            var n = 2
+            while ("${template.id}_$n" in existingIds) n++
+            "${template.id}_$n"
+        }
+        buttons.add(template.copy(id = newId, xFrac = 0.5f, yFrac = 0.5f))
+        selectedId.value = newId
+    }
+
+    fun deleteElement(id: String) {
+        pushUndo()
+        buttons.removeAll { it.id == id }
+        if (selectedId.value == id) selectedId.value = null
+    }
+
+    fun changeSize(id: String, delta: Float) {
+        val i = buttons.indexOfFirst { it.id == id }
+        if (i >= 0) {
+            pushUndo()
+            val cur = buttons[i]
+            buttons[i] = cur.copy(sizeFrac = (cur.sizeFrac + delta).coerceIn(MIN_CONTROL_SIZE, MAX_CONTROL_SIZE))
+        }
+    }
+
+    fun changePosition(id: String, dx: Float, dy: Float) {
+        val i = buttons.indexOfFirst { it.id == id }
+        if (i >= 0) {
+            pushUndo()
+            val cur = buttons[i]
+            buttons[i] = cur.copy(
+                xFrac = (cur.xFrac + dx).coerceIn(MIN_POSITION, MAX_POSITION),
+                yFrac = (cur.yFrac + dy).coerceIn(MIN_POSITION, MAX_POSITION)
+            )
+        }
+    }
+
+    fun updateButton(next: ButtonConfig) {
+        val i = buttons.indexOfFirst { it.id == next.id }
+        if (i < 0 || buttons[i] == next) return
+        pushUndo()
+        buttons[i] = next
+    }
+
+    fun changeLabel(id: String, text: String) {
+        val i = buttons.indexOfFirst { it.id == id }
+        if (i < 0) return
+        if (labelEditId != id) {
+            pushUndo()
+            labelEditId = id
+        }
+        buttons[i] = buttons[i].copy(label = text)
+    }
+
+    // Moves freely during a drag; snapToGrid runs on release so small moves are not pulled back mid-drag.
+    fun dragBy(id: String, dxPx: Float, dyPx: Float, widthPx: Float, heightPx: Float) {
+        val i = buttons.indexOfFirst { it.id == id }
+        if (i < 0 || widthPx <= 0 || heightPx <= 0) return
+        val cur = buttons[i]
+        buttons[i] = cur.copy(
+            xFrac = (cur.xFrac + dxPx / widthPx).coerceIn(MIN_POSITION, MAX_POSITION),
+            yFrac = (cur.yFrac + dyPx / heightPx).coerceIn(MIN_POSITION, MAX_POSITION)
+        )
+    }
+
+    fun scaleBy(id: String, zoom: Float) {
+        val i = buttons.indexOfFirst { it.id == id }
+        if (i < 0) return
+        val cur = buttons[i]
+        buttons[i] = cur.copy(sizeFrac = (cur.sizeFrac * zoom).coerceIn(MIN_CONTROL_SIZE, MAX_CONTROL_SIZE))
+    }
+
+    fun snapToGrid(id: String, widthPx: Float, heightPx: Float, stepPx: Float) {
+        val i = buttons.indexOfFirst { it.id == id }
+        if (i < 0 || widthPx <= 0 || heightPx <= 0) return
+        val cur = buttons[i]
+        val cx = (cur.xFrac * widthPx / stepPx).roundToInt() * stepPx
+        val cy = (cur.yFrac * heightPx / stepPx).roundToInt() * stepPx
+        buttons[i] = cur.copy(
+            xFrac = (cx / widthPx).coerceIn(MIN_POSITION, MAX_POSITION),
+            yFrac = (cy / heightPx).coerceIn(MIN_POSITION, MAX_POSITION)
+        )
+    }
 }
 
 data class ControllerLayout(

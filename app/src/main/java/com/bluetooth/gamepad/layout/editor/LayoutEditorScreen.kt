@@ -25,11 +25,6 @@ import com.bluetooth.gamepad.layout.ControllerLayout
 import com.bluetooth.gamepad.layout.EditorSession
 import com.bluetooth.gamepad.layout.LayoutRepository
 import com.bluetooth.gamepad.layout.MAX_CONTROLS
-import kotlin.math.roundToInt
-
-private const val MIN_SIZE = 0.04f
-
-private const val MAX_SIZE = 0.6f
 
 @Composable
 fun LayoutEditorScreen(
@@ -44,43 +39,15 @@ fun LayoutEditorScreen(
     val buttons = session.buttons
     val selectedId = session.selectedId
     val edited = session.edited
-    val undoStack = session.undoStack
-    val redoStack = session.redoStack
     // Transient view state — resets each time the editor is shown; need not survive Test.
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
     val addOpen = remember { mutableStateOf(false) }
     val snapEnabled = remember { mutableStateOf(true) }
     val showExitDialog = remember { mutableStateOf(false) }
-    val labelUndoFor = remember { mutableStateOf<String?>(null) }
+    // Label edits made before a Test preview start a fresh undo step.
+    remember(session) { session.endLabelEdit() }
     val density = LocalDensity.current.density
     val context = LocalContext.current
-
-    fun pushUndo() {
-        labelUndoFor.value = null
-        if (undoStack.size >= 50) undoStack.removeAt(0)
-        undoStack.add(buttons.toList())
-        redoStack.clear()
-        edited.value = true
-    }
-
-    fun undo() {
-        if (undoStack.isEmpty()) return
-        labelUndoFor.value = null
-        redoStack.add(buttons.toList())
-        val prev = undoStack.removeAt(undoStack.lastIndex)
-        buttons.clear()
-        buttons.addAll(prev)
-    }
-
-    fun redo() {
-        if (redoStack.isEmpty()) return
-        labelUndoFor.value = null
-        if (undoStack.size >= 50) undoStack.removeAt(0)
-        undoStack.add(buttons.toList())
-        val next = redoStack.removeAt(redoStack.lastIndex)
-        buttons.clear()
-        buttons.addAll(next)
-    }
 
     fun saveLayout() {
         repo.save(layout.copy(buttons = buttons.toList()))
@@ -106,65 +73,8 @@ fun LayoutEditorScreen(
             Toast.makeText(context, "A layout can have up to $MAX_CONTROLS controls", Toast.LENGTH_SHORT).show()
             return
         }
-        pushUndo()
-        // Generate a unique id: the bare template id for the first instance, then "<id>_N" for
-        // duplicates. Probe for the next free suffix so deleting an earlier duplicate can never
-        // produce a colliding id.
-        val existingIds = buttons.mapTo(HashSet()) { it.id }
-        val newId = if (template.id !in existingIds) {
-            template.id
-        } else {
-            var n = 2
-            while ("${template.id}_$n" in existingIds) n++
-            "${template.id}_$n"
-        }
-        buttons.add(template.copy(id = newId, xFrac = 0.5f, yFrac = 0.5f))
-        selectedId.value = newId
+        session.addElement(template)
         addOpen.value = false
-    }
-
-    fun deleteElement(id: String) {
-        pushUndo()
-        buttons.removeAll { it.id == id }
-        if (selectedId.value == id) selectedId.value = null
-    }
-
-    fun changeSize(id: String, delta: Float) {
-        val i = buttons.indexOfFirst { it.id == id }
-        if (i >= 0) {
-            pushUndo()
-            val cur = buttons[i]
-            buttons[i] = cur.copy(sizeFrac = (cur.sizeFrac + delta).coerceIn(MIN_SIZE, MAX_SIZE))
-        }
-    }
-
-    fun changePosition(id: String, dx: Float, dy: Float) {
-        val i = buttons.indexOfFirst { it.id == id }
-        if (i >= 0) {
-            pushUndo()
-            val cur = buttons[i]
-            buttons[i] = cur.copy(
-                xFrac = (cur.xFrac + dx).coerceIn(0.02f, 0.98f),
-                yFrac = (cur.yFrac + dy).coerceIn(0.02f, 0.98f)
-            )
-        }
-    }
-
-    fun updateButton(next: ButtonConfig) {
-        val i = buttons.indexOfFirst { it.id == next.id }
-        if (i < 0 || buttons[i] == next) return
-        pushUndo()
-        buttons[i] = next
-    }
-
-    fun changeLabel(id: String, text: String) {
-        val i = buttons.indexOfFirst { it.id == id }
-        if (i < 0) return
-        if (labelUndoFor.value != id) {
-            pushUndo()
-            labelUndoFor.value = id
-        }
-        buttons[i] = buttons[i].copy(label = text)
     }
 
     // Hardware back closes an open overlay first, then prompts for unsaved edits, then exits.
@@ -180,65 +90,33 @@ fun LayoutEditorScreen(
             density = density,
             onSizeChanged = { canvasSize.value = it },
             onSelect = { id ->
-                selectedId.value = id
-                labelUndoFor.value = null
+                session.select(id)
                 addOpen.value = false
             },
             onMove = { id, dx, dy ->
-                // Move freely during the drag; snapping happens on release (onMoveEnd) so small
-                // movements are not pulled back to the same grid cell mid-drag.
-                val i = buttons.indexOfFirst { it.id == id }
-                if (i >= 0) {
-                    val w = canvasSize.value.width.toFloat()
-                    val h = canvasSize.value.height.toFloat()
-                    val cur = buttons[i]
-                    if (w > 0 && h > 0) {
-                        buttons[i] = cur.copy(
-                            xFrac = (cur.xFrac + dx / w).coerceIn(0.02f, 0.98f),
-                            yFrac = (cur.yFrac + dy / h).coerceIn(0.02f, 0.98f)
-                        )
-                    }
-                }
+                session.dragBy(id, dx, dy, canvasSize.value.width.toFloat(), canvasSize.value.height.toFloat())
             },
-            onScale = { id, zoom ->
-                val i = buttons.indexOfFirst { it.id == id }
-                if (i >= 0) {
-                    val cur = buttons[i]
-                    buttons[i] = cur.copy(sizeFrac = (cur.sizeFrac * zoom).coerceIn(MIN_SIZE, MAX_SIZE))
-                }
-            },
-            onMoveStart = { pushUndo() },
+            onScale = { id, zoom -> session.scaleBy(id, zoom) },
+            onMoveStart = { session.pushUndo() },
             onMoveEnd = { id ->
+                // Snap the button centre to the same 16.dp grid the canvas draws.
                 if (snapEnabled.value) {
-                    val i = buttons.indexOfFirst { it.id == id }
-                    val w = canvasSize.value.width.toFloat()
-                    val h = canvasSize.value.height.toFloat()
-                    if (i >= 0 && w > 0 && h > 0) {
-                        val cur = buttons[i]
-                        // Snap the button centre to the same 16.dp grid the canvas draws.
-                        val stepPx = 16f * density
-                        val cx = (cur.xFrac * w / stepPx).roundToInt() * stepPx
-                        val cy = (cur.yFrac * h / stepPx).roundToInt() * stepPx
-                        buttons[i] = cur.copy(
-                            xFrac = (cx / w).coerceIn(0.02f, 0.98f),
-                            yFrac = (cy / h).coerceIn(0.02f, 0.98f)
-                        )
-                    }
+                    session.snapToGrid(id, canvasSize.value.width.toFloat(), canvasSize.value.height.toFloat(), 16f * density)
                 }
             },
-            onDelete = { id -> deleteElement(id) }
+            onDelete = { id -> session.deleteElement(id) }
         )
 
         EditorTopBar(
             layoutName = layout.name,
             snapEnabled = snapEnabled.value,
             addOpen = addOpen.value,
-            canUndo = undoStack.isNotEmpty(),
-            canRedo = redoStack.isNotEmpty(),
+            canUndo = session.undoStack.isNotEmpty(),
+            canRedo = session.redoStack.isNotEmpty(),
             containerSize = canvasSize.value,
             onBack = { requestBack() },
-            onUndo = { undo() },
-            onRedo = { redo() },
+            onUndo = { session.undo() },
+            onRedo = { session.redo() },
             onSnapToggle = { snapEnabled.value = !snapEnabled.value },
             onAddToggle = {
                 addOpen.value = !addOpen.value
@@ -254,11 +132,11 @@ fun LayoutEditorScreen(
                 button = sel,
                 containerSize = canvasSize.value,
                 onClose = { selectedId.value = null },
-                onSizeChange = { delta -> changeSize(sel.id, delta) },
-                onPositionChange = { dx, dy -> changePosition(sel.id, dx, dy) },
-                onUpdate = { updateButton(it) },
-                onLabelChange = { changeLabel(sel.id, it) },
-                onDelete = { deleteElement(sel.id) }
+                onSizeChange = { delta -> session.changeSize(sel.id, delta) },
+                onPositionChange = { dx, dy -> session.changePosition(sel.id, dx, dy) },
+                onUpdate = { session.updateButton(it) },
+                onLabelChange = { session.changeLabel(sel.id, it) },
+                onDelete = { session.deleteElement(sel.id) }
             )
         }
 
